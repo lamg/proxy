@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net"
 	h "net/http"
@@ -23,12 +24,25 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
 }
 
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
-	dest_conn, e := p.ConnectDial("tcp", r.Host, p.Timeout)
+	var e error
+	var dest_conn net.Conn
+	if p.ConnectDial != nil {
+		dest_conn, e = p.ConnectDial("tcp", r.Host, p.Timeout)
+	} else {
+		print("proxy: ")
+		println(p == nil)
+		print("Tr: ")
+		println(p.Tr == nil)
+		print("r: ")
+		println(r == nil)
+		dest_conn, e = p.Tr.Dial("tcp", r.Host)
+	}
 	var hijacker h.Hijacker
 	var status int
 	if e == nil {
 		w.WriteHeader(h.StatusOK)
-		hijacker, ok := w.(h.Hijacker)
+		var ok bool
+		hijacker, ok = w.(h.Hijacker)
 		if !ok {
 			e = NoHijacking()
 		}
@@ -55,7 +69,7 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
 
 func transfer(dest io.WriteCloser, src io.ReadCloser) {
 	io.Copy(dest, src)
-	des.Close()
+	dest.Close()
 	src.Close()
 }
 
@@ -68,7 +82,7 @@ func (p *Proxy) handleHTTP(w h.ResponseWriter, req *h.Request) {
 		resp.Body.Close()
 	}
 	if e != nil {
-		h.Error(w, err.Error(), h.StatusServiceUnavailable)
+		h.Error(w, e.Error(), h.StatusServiceUnavailable)
 	}
 }
 
@@ -93,4 +107,9 @@ func copyHeader(dst, src h.Header) {
 			}
 		}
 	}
+}
+
+func NoHijacking() (e error) {
+	e = fmt.Errorf("No hijacking supported")
+	return
 }
