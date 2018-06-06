@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -9,10 +10,8 @@ import (
 )
 
 type Proxy struct {
-	Timeout     time.Duration
-	Tr          *h.Transport
-	ConnectDial func(ntw, addr string,
-		timeout time.Duration) (net.Conn, error)
+	Timeout time.Duration
+	Tr      *h.Transport
 }
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
@@ -24,23 +23,11 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
 }
 
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
-	var e error
-	var dest_conn net.Conn
-	if p.ConnectDial != nil {
-		dest_conn, e = p.ConnectDial("tcp", r.Host, p.Timeout)
-	} else {
-		print("proxy: ")
-		println(p == nil)
-		print("Tr: ")
-		println(p.Tr == nil)
-		print("r: ")
-		println(r == nil)
-		dest_conn, e = p.Tr.Dial("tcp", r.Host)
-	}
+	dest_conn, e := p.Tr.DialContext(context.Background(),
+		"tcp", r.Host)
 	var hijacker h.Hijacker
-	var status int
+	status := h.StatusOK
 	if e == nil {
-		w.WriteHeader(h.StatusOK)
 		var ok bool
 		hijacker, ok = w.(h.Hijacker)
 		if !ok {
@@ -64,6 +51,8 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
 
 	if e != nil {
 		h.Error(w, e.Error(), status)
+	} else {
+		w.WriteHeader(status)
 	}
 }
 
@@ -77,12 +66,13 @@ func (p *Proxy) handleHTTP(w h.ResponseWriter, req *h.Request) {
 	resp, e := p.Tr.RoundTrip(req)
 	if e == nil {
 		copyHeader(w.Header(), resp.Header)
-		w.WriteHeader(resp.StatusCode)
 		_, e = io.Copy(w, resp.Body)
 		resp.Body.Close()
 	}
 	if e != nil {
 		h.Error(w, e.Error(), h.StatusServiceUnavailable)
+	} else {
+		w.WriteHeader(resp.StatusCode)
 	}
 }
 

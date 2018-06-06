@@ -23,8 +23,11 @@ func main() {
 		_, iprgs[i], e = net.ParseCIDR(rgs[i])
 	}
 	if e == nil {
+		dialer := new(net.Dialer)
 		prox := &proxy.Proxy{
-			Tr: &h.Transport{},
+			Tr: &h.Transport{
+				DialContext: dialer.DialContext,
+			},
 		}
 		np := &nProxy{
 			proxy:   prox,
