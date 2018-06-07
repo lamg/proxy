@@ -29,6 +29,7 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
 	status := h.StatusOK
 	if e == nil {
 		var ok bool
+		w.WriteHeader(status)
 		hijacker, ok = w.(h.Hijacker)
 		if !ok {
 			e = NoHijacking()
@@ -51,8 +52,6 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
 
 	if e != nil {
 		h.Error(w, e.Error(), status)
-	} else {
-		w.WriteHeader(status)
 	}
 }
 
@@ -66,13 +65,11 @@ func (p *Proxy) handleHTTP(w h.ResponseWriter, req *h.Request) {
 	resp, e := p.Tr.RoundTrip(req)
 	if e == nil {
 		copyHeader(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
 		_, e = io.Copy(w, resp.Body)
 		resp.Body.Close()
-	}
-	if e != nil {
-		h.Error(w, e.Error(), h.StatusServiceUnavailable)
 	} else {
-		w.WriteHeader(resp.StatusCode)
+		h.Error(w, e.Error(), h.StatusServiceUnavailable)
 	}
 }
 
