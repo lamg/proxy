@@ -6,12 +6,11 @@ import (
 	"io"
 	"net"
 	h "net/http"
-	"time"
 )
 
+// Proxy is an http.Handler that proxying HTTP or HTTPS requests
 type Proxy struct {
-	Timeout time.Duration
-	Tr      *h.Transport
+	Tr *h.Transport
 }
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
@@ -23,7 +22,7 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
 }
 
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
-	dest_conn, e := p.Tr.DialContext(context.Background(),
+	destConn, e := p.Tr.DialContext(context.Background(),
 		"tcp", r.Host)
 	var hijacker h.Hijacker
 	status := h.StatusOK
@@ -37,15 +36,15 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
 	} else {
 		status = h.StatusServiceUnavailable
 	}
-	var client_conn net.Conn
+	var clientConn net.Conn
 	if e == nil {
-		client_conn, _, e = hijacker.Hijack()
+		clientConn, _, e = hijacker.Hijack()
 	} else {
 		status = h.StatusInternalServerError
 	}
 	if e == nil {
-		go transfer(dest_conn, client_conn)
-		go transfer(client_conn, dest_conn)
+		go transfer(destConn, clientConn)
+		go transfer(clientConn, destConn)
 	} else {
 		status = h.StatusServiceUnavailable
 	}
@@ -96,6 +95,7 @@ func copyHeader(dst, src h.Header) {
 	}
 }
 
+// NoHijacking error
 func NoHijacking() (e error) {
 	e = fmt.Errorf("No hijacking supported")
 	return
