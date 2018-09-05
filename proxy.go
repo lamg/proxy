@@ -21,9 +21,15 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
 	}
 }
 
+type ReqKeyT struct {
+	Value string
+}
+
+var ReqKey = &ReqKeyT{Value: "ReqKey"}
+
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
-	destConn, e := p.Tr.DialContext(context.Background(),
-		"tcp", r.Host)
+	ctx := context.WithValue(context.Background(), ReqKey.Value, ReqKey)
+	destConn, e := p.Tr.DialContext(ctx, "tcp", r.Host)
 	var hijacker h.Hijacker
 	status := h.StatusOK
 	if e == nil {
