@@ -21,14 +21,16 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
 	}
 }
 
+// ReqKeyT is the type for creating the value sent in context
 type ReqKeyT struct {
 	Value string
 }
 
+// ReqKey is the instance sent in context
 var ReqKey = &ReqKeyT{Value: "ReqKey"}
 
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
-	ctx := context.WithValue(context.Background(), ReqKey.Value, ReqKey)
+	ctx := context.WithValue(context.Background(), ReqKey, r)
 	destConn, e := p.Tr.DialContext(ctx, "tcp", r.Host)
 	var hijacker h.Hijacker
 	status := h.StatusOK
