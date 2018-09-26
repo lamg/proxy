@@ -3,11 +3,12 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"github.com/lamg/proxy"
 	"log"
 	"net"
 	h "net/http"
 	"time"
+
+	"github.com/lamg/proxy"
 )
 
 func main() {
@@ -23,10 +24,11 @@ func main() {
 		_, iprgs[i], e = net.ParseCIDR(rgs[i])
 	}
 	if e == nil {
-		dialer := new(net.Dialer)
 		prox := &proxy.Proxy{
-			Tr: &h.Transport{
-				DialContext: dialer.DialContext,
+			Rt: h.DefaultTransport,
+			Dial: func(r *h.Request) (c net.Conn, e error) {
+				c, e = net.Dial("tcp", r.Host)
+				return
 			},
 		}
 		np := &nProxy{
