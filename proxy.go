@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net"
@@ -10,7 +9,8 @@ import (
 
 // Proxy is an http.Handler that proxying HTTP or HTTPS requests
 type Proxy struct {
-	Tr *h.Transport
+	Rt   h.RoundTripper
+	Dial func(*h.Request) (net.Conn, error)
 }
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
@@ -30,8 +30,7 @@ type ReqKeyT struct {
 var ReqKey = &ReqKeyT{Value: "ReqKey"}
 
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
-	ctx := context.WithValue(context.Background(), ReqKey, r)
-	destConn, e := p.Tr.DialContext(ctx, "tcp", r.Host)
+	destConn, e := p.Dial(r)
 	var hijacker h.Hijacker
 	status := h.StatusOK
 	if e == nil {
@@ -69,7 +68,7 @@ func transfer(dest io.WriteCloser, src io.ReadCloser) {
 }
 
 func (p *Proxy) handleHTTP(w h.ResponseWriter, req *h.Request) {
-	resp, e := p.Tr.RoundTrip(req)
+	resp, e := p.Rt.RoundTrip(req)
 	if e == nil {
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)

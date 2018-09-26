@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"net"
 	h "net/http"
 	"net/http/httptest"
@@ -13,9 +12,7 @@ import (
 func TestProxy(t *testing.T) {
 	d := &dialer{t: t}
 	p := &Proxy{
-		Tr: &h.Transport{
-			DialContext: d.DialContext,
-		},
+		Dial: d.Dial,
 	}
 	r := httptest.NewRequest(h.MethodGet, "http://bla.com", nil)
 	w := httptest.NewRecorder()
@@ -26,10 +23,7 @@ type dialer struct {
 	t *testing.T
 }
 
-func (d *dialer) DialContext(ctx context.Context, nt,
-	host string) (c net.Conn, e error) {
-	r, ok := ctx.Value(ReqKey).(*h.Request)
-	require.True(d.t, ok)
+func (d *dialer) Dial(r *h.Request) (c net.Conn, e error) {
 	require.Equal(d.t, "bla.com", r.Host)
 	return
 }
