@@ -1,36 +1,31 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	h "net/http"
 )
 
-// Proxy is an http.Handler that proxying HTTP or HTTPS requests
+// Proxy is an HTTP proxy
 type Proxy struct {
-	Rt   h.RoundTripper
-	Dial func(*h.Request) (net.Conn, error)
+	Rt          h.RoundTripper
+	DialContext func(context.Context, string, string) (net.Conn, error)
+	AddCtxValue func(*h.Request) *h.Request
 }
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
+	cr := p.AddCtxValue(r)
 	if r.Method == h.MethodConnect {
-		p.handleTunneling(w, r)
+		p.handleTunneling(w, cr)
 	} else {
-		p.handleHTTP(w, r)
+		p.handleHTTP(w, cr)
 	}
 }
 
-// ReqKeyT is the type for creating the value sent in context
-type ReqKeyT struct {
-	Value string
-}
-
-// ReqKey is the instance sent in context
-var ReqKey = &ReqKeyT{Value: "ReqKey"}
-
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
-	destConn, e := p.Dial(r)
+	destConn, e := p.DialContext(r.Context(), "tcp", r.Host)
 	var hijacker h.Hijacker
 	status := h.StatusOK
 	if e == nil {
