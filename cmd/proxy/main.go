@@ -11,20 +11,33 @@ import (
 	"time"
 
 	"github.com/lamg/proxy"
+	gp "golang.org/x/net/proxy"
 )
 
 func main() {
-	var addr, lrange string
+	var addr, lrange, socks string
 	flag.StringVar(&addr, "a", ":8080", "Server address")
-	flag.StringVar(&lrange, "r", "", "CIDR range for listening")
+	flag.StringVar(&lrange, "r", "127.0.0.1/32", "CIDR range for listening")
+	flag.StringVar(&socks, "s", "", "SOCKS5 proxy address")
 	flag.Parse()
 
+	var dl gp.Dialer
+	if socks != "" {
+		var er error
+		dl, er = gp.SOCKS5("tcp", socks, nil, gp.Direct)
+		if er != nil {
+			dl = gp.Direct
+			log.Println(er.Error())
+		}
+	}
+
 	rgs := []string{lrange}
-	tr, e := newTransport(rgs)
+	ctxDl := newCtxDialer(dl)
+	tr, e := newTransport(rgs, ctxDl)
 	if e == nil {
 		np := &proxy.Proxy{
 			Rt:          tr,
-			DialContext: dialContext,
+			DialContext: ctxDl,
 			AddCtxValue: tr.addCtxValue,
 		}
 		server := &h.Server{
@@ -49,14 +62,15 @@ type transport struct {
 	iprgs []*net.IPNet
 }
 
-func newTransport(cidrs []string) (n *transport, e error) {
+func newTransport(cidrs []string, cd ctxDialer) (n *transport,
+	e error) {
 	iprgs := make([]*net.IPNet, len(cidrs))
 	for i := 0; e == nil && i != len(cidrs); i++ {
 		_, iprgs[i], e = net.ParseCIDR(cidrs[i])
 	}
 	if e == nil {
 		tr := &h.Transport{
-			DialContext:           dialContext,
+			DialContext:           cd,
 			MaxIdleConns:          100,
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
@@ -100,16 +114,21 @@ func (n *transport) addCtxValue(r *h.Request) (x *h.Request) {
 	return
 }
 
-func dialContext(ctx context.Context,
-	network, addr string) (c net.Conn, e error) {
-	cv, ok := ctx.Value(ctxValK).(*ctxVal)
-	if !ok {
-		e = fmt.Errorf("No error value with key %s", ctxValK)
-	} else {
-		e = cv.err
-	}
-	if e == nil {
-		c, e = net.Dial(network, addr)
+type ctxDialer func(context.Context, string,
+	string) (net.Conn, error)
+
+func newCtxDialer(d gp.Dialer) (x ctxDialer) {
+	x = func(ctx context.Context, network, addr string) (c net.Conn, e error) {
+		cv, ok := ctx.Value(ctxValK).(*ctxVal)
+		if !ok {
+			e = fmt.Errorf("No error value with key %s", ctxValK)
+		} else {
+			e = cv.err
+		}
+		if e == nil {
+			c, e = d.Dial(network, addr)
+		}
+		return
 	}
 	return
 }

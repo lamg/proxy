@@ -1,7 +1,3 @@
 module github.com/lamg/proxy
 
-require (
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/stretchr/testify v1.2.2
-)
+require golang.org/x/net v0.0.0-20181213202711-891ebc4b82d6
