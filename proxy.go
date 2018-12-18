@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	fh "github.com/valyala/fasthttp"
 	"io"
 	"net"
 	h "net/http"
@@ -22,6 +23,10 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter, r *h.Request) {
 	} else {
 		p.handleHTTP(w, cr)
 	}
+}
+
+func (p *Proxy) ReqHnd(ctx *fh.RequestCtx) {
+	// TODO
 }
 
 func (p *Proxy) handleTunneling(w h.ResponseWriter, r *h.Request) {
