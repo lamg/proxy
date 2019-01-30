@@ -5,102 +5,143 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"github.com/valyala/fasthttp"
 	"log"
 	"net"
 	h "net/http"
 	"time"
 
+	"github.com/elazarl/goproxy"
 	"github.com/lamg/proxy"
 	gp "golang.org/x/net/proxy"
 )
 
 func main() {
 	var addr, lrange, socks string
+	var fastH, elazarl bool
 	flag.StringVar(&addr, "a", ":8080", "Server address")
-	flag.StringVar(&lrange, "r", "127.0.0.1/32", "CIDR range for listening")
+	flag.StringVar(&lrange, "r", "127.0.0.1/32",
+		"CIDR range for listening")
 	flag.StringVar(&socks, "s", "", "SOCKS5 proxy address")
+	flag.BoolVar(&fastH, "f", false,
+		"Use github.com/valyala/fasthttp")
+	flag.BoolVar(&elazarl, "e", false,
+		"Use github.com/elazarl/goproxy")
 	flag.Parse()
 
-	var dl gp.Dialer
+	dl := gp.Dialer(gp.Direct)
 	if socks != "" {
 		var er error
 		dl, er = gp.SOCKS5("tcp", socks, nil, gp.Direct)
 		if er != nil {
-			dl = gp.Direct
 			log.Println(er.Error())
 		}
 	}
 
 	rgs := []string{lrange}
-	ctxDl := newCtxDialer(dl)
-	tr, e := newTransport(rgs, ctxDl)
+	ctxDl := newCtxDialer(dl.Dial)
+	ctxV, e := newRangeIPCtx(rgs)
 	if e == nil {
-		np := &proxy.Proxy{
-			Rt:          tr,
-			DialContext: ctxDl,
-			AddCtxValue: tr.addCtxValue,
+		dialF := proxy.DialCtxF(ctxDl)
+		cv := ctxV.setVal
+		maxIdleConns := 100
+		idleConnTimeout := 90 * time.Second
+		tlsHandshakeTimeout := 10 * time.Second
+		expectContinueTimeout := time.Second
+		if fastH {
+			np := proxy.NewFastProxy(
+				dialF,
+				cv,
+				maxIdleConns,
+				idleConnTimeout,
+				tlsHandshakeTimeout,
+				expectContinueTimeout,
+				time.Now,
+			)
+			e = fastSrv(np, addr)
+		} else if elazarl {
+			hnd := goproxy.NewProxyHttpServer()
+			e = h.ListenAndServe(addr, hnd)
+		} else {
+			np := proxy.NewProxy(
+				dialF,
+				cv,
+				maxIdleConns,
+				idleConnTimeout,
+				tlsHandshakeTimeout,
+				expectContinueTimeout,
+				time.Now,
+			)
+			e = standardSrv(np, addr)
 		}
-		server := &h.Server{
-			Addr:         addr,
-			Handler:      np,
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 10 * time.Second,
-			// Disable HTTP/2.
-			TLSNextProto: make(map[string]func(*h.Server, *tls.Conn,
-				h.Handler)),
-		}
-		e = server.ListenAndServe()
 	}
-
 	if e != nil {
 		log.Fatal(e)
 	}
 }
 
-type transport struct {
-	h.RoundTripper
+func fastSrv(p *proxy.Proxy, addr string) (e error) {
+	e = fasthttp.ListenAndServe(addr, p.ReqHnd)
+	return
+}
+
+func standardSrv(p *proxy.Proxy, addr string) (e error) {
+	server := &h.Server{
+		Addr:         addr,
+		Handler:      p,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		// Disable HTTP/2.
+		TLSNextProto: make(map[string]func(*h.Server,
+			*tls.Conn, h.Handler)),
+	}
+	e = server.ListenAndServe()
+	return
+}
+
+type rangeIPCtx struct {
 	iprgs []*net.IPNet
 }
 
-func newTransport(cidrs []string, cd ctxDialer) (n *transport,
+func newRangeIPCtx(cidrs []string) (n *rangeIPCtx,
 	e error) {
 	iprgs := make([]*net.IPNet, len(cidrs))
-	for i := 0; e == nil && i != len(cidrs); i++ {
+	ib := func(i int) (b bool) {
+		var e error
 		_, iprgs[i], e = net.ParseCIDR(cidrs[i])
+		b = e != nil
+		return
 	}
+	bLnSrch(ib, len(cidrs))
 	if e == nil {
-		tr := &h.Transport{
-			DialContext:           cd,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		}
-		n = &transport{
-			RoundTripper: tr,
-			iprgs:        iprgs,
+		n = &rangeIPCtx{
+			iprgs: iprgs,
 		}
 	}
 	return
 }
 
-type ctxValKT string
+type keyT string
 
-var ctxValK = ctxValKT("ctxVal")
+var key = keyT("error")
 
-type ctxVal struct {
-	err error
+type errV struct {
+	isNil bool
+	e     error
 }
 
-func (n *transport) addCtxValue(r *h.Request) (x *h.Request) {
-	host, _, e := net.SplitHostPort(r.RemoteAddr)
+func (n *rangeIPCtx) setVal(ctx context.Context,
+	method, url, rAddr string,
+	t time.Time) (nctx context.Context) {
+	host, _, e := net.SplitHostPort(rAddr)
 	if e == nil {
 		ni := net.ParseIP(host)
 		if ni != nil {
-			ok := false
-			for i := 0; !ok && i != len(n.iprgs); i++ {
-				ok = n.iprgs[i].Contains(ni)
+			ib := func(i int) (b bool) {
+				b = n.iprgs[i].Contains(ni)
+				return
 			}
+			ok, _ := bLnSrch(ib, len(n.iprgs))
 			if !ok {
 				e = fmt.Errorf("Host %s out of range", host)
 			}
@@ -108,27 +149,46 @@ func (n *transport) addCtxValue(r *h.Request) (x *h.Request) {
 			e = fmt.Errorf("Error parsing host IP %s", host)
 		}
 	}
-	ctx := r.Context()
-	nctx := context.WithValue(ctx, ctxValK, &ctxVal{err: e})
-	x = r.WithContext(nctx)
+	nctx = context.WithValue(ctx, key,
+		&errV{isNil: e == nil, e: e})
 	return
 }
 
 type ctxDialer func(context.Context, string,
 	string) (net.Conn, error)
 
-func newCtxDialer(d gp.Dialer) (x ctxDialer) {
-	x = func(ctx context.Context, network, addr string) (c net.Conn, e error) {
-		cv, ok := ctx.Value(ctxValK).(*ctxVal)
+type dialer func(string, string) (net.Conn, error)
+
+func newCtxDialer(d dialer) (x ctxDialer) {
+	x = func(ctx context.Context, network,
+		addr string) (c net.Conn, e error) {
+		err, ok := ctx.Value(key).(*errV)
 		if !ok {
-			e = fmt.Errorf("No error value with key %s", ctxValK)
+			e = fmt.Errorf("No error value with key %s", key)
 		} else {
-			e = cv.err
+			e = err.e
 		}
 		if e == nil {
-			c, e = d.Dial(network, addr)
+			c, e = d(network, addr)
 		}
 		return
+	}
+	return
+}
+
+type intBool func(int) bool
+
+// bLnSrch is the bounded lineal search algorithm
+// { n ≥ 0 ∧ ⟨∀i: 0 ≤ i < n: def.(ib.i)⟩ }
+// { i = ⟨↑j: 0 ≤ j ≤ n ∧ ⟨∀k: 0 ≤ k < j: ¬ib.k⟩: j⟩ ∧
+//   b ≡ i ≠ n }
+func bLnSrch(ib intBool, n int) (b bool, i int) {
+	b, i = false, 0
+	for !b && i != n {
+		b = ib(i)
+		if !b {
+			i = i + 1
+		}
 	}
 	return
 }
