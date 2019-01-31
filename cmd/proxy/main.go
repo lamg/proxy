@@ -5,84 +5,63 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"github.com/valyala/fasthttp"
+
 	"log"
 	"net"
 	h "net/http"
+	"net/url"
 	"time"
 
-	"github.com/elazarl/goproxy"
 	"github.com/lamg/proxy"
-	gp "golang.org/x/net/proxy"
 )
 
 func main() {
-	var addr, lrange, socks string
+	var addr, lrange, proxyURL string
 	var fastH, elazarl bool
 	flag.StringVar(&addr, "a", ":8080", "Server address")
 	flag.StringVar(&lrange, "r", "127.0.0.1/32",
 		"CIDR range for listening")
-	flag.StringVar(&socks, "s", "", "SOCKS5 proxy address")
+	flag.StringVar(&proxyURL, "p", "", "Proxy address")
 	flag.BoolVar(&fastH, "f", false,
 		"Use github.com/valyala/fasthttp")
 	flag.BoolVar(&elazarl, "e", false,
 		"Use github.com/elazarl/goproxy")
 	flag.Parse()
 
-	dl := gp.Dialer(gp.Direct)
-	if socks != "" {
-		var er error
-		dl, er = gp.SOCKS5("tcp", socks, nil, gp.Direct)
-		if er != nil {
-			log.Println(er.Error())
-		}
+	var e error
+	var u *url.URL
+	if proxyURL != "" {
+		u, e = url.Parse(proxyURL)
 	}
-
-	rgs := []string{lrange}
-	ctxDl := newCtxDialer(dl.Dial)
-	ctxV, e := newRangeIPCtx(rgs)
+	var ctxV *rangeIPCtx
 	if e == nil {
-		dialF := proxy.DialCtxF(ctxDl)
-		cv := ctxV.setVal
+		rgs := []string{lrange}
+		ctxV, e = newRangeIPCtx(rgs)
+	}
+	var np *proxy.Proxy
+	if e == nil {
 		maxIdleConns := 100
 		idleConnTimeout := 90 * time.Second
 		tlsHandshakeTimeout := 10 * time.Second
 		expectContinueTimeout := time.Second
-		if fastH {
-			np := proxy.NewFastProxy(
-				dialF,
-				cv,
-				maxIdleConns,
-				idleConnTimeout,
-				tlsHandshakeTimeout,
-				expectContinueTimeout,
-				time.Now,
-			)
-			e = fastSrv(np, addr)
-		} else if elazarl {
-			hnd := goproxy.NewProxyHttpServer()
-			e = h.ListenAndServe(addr, hnd)
-		} else {
-			np := proxy.NewProxy(
-				dialF,
-				cv,
-				maxIdleConns,
-				idleConnTimeout,
-				tlsHandshakeTimeout,
-				expectContinueTimeout,
-				time.Now,
-			)
-			e = standardSrv(np, addr)
-		}
+
+		np, e = proxy.NewProxy(
+			dialContext,
+			ctxV.setVal,
+			maxIdleConns,
+			idleConnTimeout,
+			tlsHandshakeTimeout,
+			expectContinueTimeout,
+			time.Now,
+			u,
+		)
+	}
+	if e == nil {
+		e = standardSrv(np, addr)
 	}
 	if e != nil {
 		log.Fatal(e)
 	}
-}
-
-func fastSrv(p *proxy.Proxy, addr string) (e error) {
-	e = fasthttp.ListenAndServe(addr, p.ReqHnd)
-	return
 }
 
 func standardSrv(p *proxy.Proxy, addr string) (e error) {
@@ -154,24 +133,16 @@ func (n *rangeIPCtx) setVal(ctx context.Context,
 	return
 }
 
-type ctxDialer func(context.Context, string,
-	string) (net.Conn, error)
-
-type dialer func(string, string) (net.Conn, error)
-
-func newCtxDialer(d dialer) (x ctxDialer) {
-	x = func(ctx context.Context, network,
-		addr string) (c net.Conn, e error) {
-		err, ok := ctx.Value(key).(*errV)
-		if !ok {
-			e = fmt.Errorf("No error value with key %s", key)
-		} else {
-			e = err.e
-		}
-		if e == nil {
-			c, e = d(network, addr)
-		}
-		return
+func dialContext(ctx context.Context, network,
+	addr string) (c net.Conn, e error) {
+	err, ok := ctx.Value(key).(*errV)
+	if !ok {
+		e = fmt.Errorf("No error value with key %s", key)
+	} else {
+		e = err.e
+	}
+	if e == nil {
+		c, e = net.Dial(network, addr)
 	}
 	return
 }

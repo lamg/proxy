@@ -4,25 +4,26 @@ import (
 	"context"
 	"fmt"
 	fh "github.com/valyala/fasthttp"
-	"golang.org/x/net/proxy"
+	gp "golang.org/x/net/proxy"
 	"io"
 	"net"
 	h "net/http"
+	"net/url"
 	"sync"
 	"time"
 )
 
 // Proxy is an HTTP proxy
 type Proxy struct {
-	clock       func() time.Time
-	rt          *h.Transport
-	dialContext DialCtxF
-	ctxValue    CtxValueF
+	clock     func() time.Time
+	trans     *h.Transport
+	connectDl ContextDialer
+	contextV  ContextValueF
 
 	fastCl *fh.Client
 }
 
-type CtxValueF func(
+type ContextValueF func(
 	context.Context,
 	string, // HTTP method
 	string, // URL
@@ -30,35 +31,71 @@ type CtxValueF func(
 	time.Time,
 ) context.Context
 
-func NewProxy(d DialCtxF, v CtxValueF, maxIdleConns int,
-	idleConnTimeout, tlsHandshakeTimeout,
-	expectContinueTimeout time.Duration,
-	clock func() time.Time,
-) (p *Proxy) {
-	rt := &h.Transport{
-		Proxy:                 h.ProxyFromEnvironment,
-		DialContext:           d,
-		MaxIdleConns:          maxIdleConns,
-		IdleConnTimeout:       idleConnTimeout,
-		TLSHandshakeTimeout:   tlsHandshakeTimeout,
-		ExpectContinueTimeout: expectContinueTimeout,
-	}
-	p = &Proxy{
-		clock:       clock,
-		rt:          rt,
-		dialContext: d,
-		ctxValue:    v,
-	}
+type ContextDialer func(context.Context, string,
+	string) (net.Conn, error)
+
+type Dialer func(string, string) (net.Conn, error)
+
+type dlWrap struct {
+	ctx func() context.Context
+	dl  ContextDialer
+}
+
+func (d *dlWrap) Dial(nt, addr string) (c net.Conn, e error) {
+	c, e = d.dl(d.ctx(), nt, addr)
 	return
 }
 
-type DialCtxF func(context.Context, string,
-	string) (net.Conn, error)
+func NewProxy(direct ContextDialer, v ContextValueF,
+	maxIdleConns int,
+	idleConnTimeout, tlsHandshakeTimeout,
+	expectContinueTimeout time.Duration,
+	clock func() time.Time, parentProxy *url.URL,
+) (p *Proxy, e error) {
+	p = &Proxy{
+		clock:    clock,
+		contextV: v,
+	}
+
+	if parentProxy != nil {
+		if parentProxy.Scheme == "http" {
+			gp.RegisterDialerType(parentProxy.Scheme, newHTTPProxy)
+		}
+		wr := &dlWrap{dl: direct}
+		var dl gp.Dialer
+		dl, e = gp.FromURL(parentProxy, wr)
+		if e == nil {
+			p.connectDl = func(c context.Context, nt,
+				addr string) (n net.Conn, e error) {
+				wr.ctx = func() context.Context { return c }
+				n, e = dl.Dial(nt, addr)
+				return
+			}
+		}
+	} else {
+		p.connectDl = direct
+	}
+	if e == nil {
+		p.trans = &h.Transport{
+			Proxy: func(r *h.Request) (u *url.URL, e error) {
+				u = parentProxy
+				return
+			},
+			DialContext:           direct,
+			MaxIdleConns:          maxIdleConns,
+			IdleConnTimeout:       idleConnTimeout,
+			TLSHandshakeTimeout:   tlsHandshakeTimeout,
+			ExpectContinueTimeout: expectContinueTimeout,
+		}
+	}
+
+	return
+}
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
 	ctx := r.Context()
-	nctx := p.ctxValue(ctx, r.Method, r.URL.String(),
+	nctx := p.contextV(ctx, r.Method, r.URL.String(),
 		r.RemoteAddr, p.clock())
 	cr := r.WithContext(nctx)
 	if r.Method == h.MethodConnect {
@@ -68,25 +105,9 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 	}
 }
 
-// type direct struct {
-// 	dialf func(string, string) (net.Conn, error)
-// }
-
-// func (d *direct) Dial(nt, addr string) (c net.Conn, e error) {
-// 	c, e = d.dialf(nt, addr)
-// 	return
-// }
-
 func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	r *h.Request) {
-	var destConn net.Conn
-	var e error
-	dl := proxy.FromEnvironment()
-	if dl != nil {
-		destConn, e = dl.Dial("tcp", r.Host)
-	} else {
-		destConn, e = p.rt.DialContext(r.Context(), "tcp", r.Host)
-	}
+	destConn, e := p.connectDl(r.Context(), "tcp", r.Host)
 
 	var hijacker h.Hijacker
 	status := h.StatusOK
@@ -150,7 +171,7 @@ func transfer(dest io.WriteCloser, src io.ReadCloser) {
 
 func (p *Proxy) handleHTTP(w h.ResponseWriter,
 	req *h.Request) {
-	resp, e := p.rt.RoundTrip(req)
+	resp, e := p.trans.RoundTrip(req)
 	if e == nil {
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
