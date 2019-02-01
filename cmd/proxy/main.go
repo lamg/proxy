@@ -53,7 +53,7 @@ func main() {
 			tlsHandshakeTimeout,
 			expectContinueTimeout,
 			time.Now,
-			u,
+			func(r *h.Request) (*url.URL, error) { return u, nil },
 		)
 	}
 	if e == nil {

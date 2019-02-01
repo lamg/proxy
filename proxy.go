@@ -50,45 +50,22 @@ func NewProxy(direct ContextDialer, v ContextValueF,
 	maxIdleConns int,
 	idleConnTimeout, tlsHandshakeTimeout,
 	expectContinueTimeout time.Duration,
-	clock func() time.Time, parentProxy *url.URL,
+	clock func() time.Time,
+	prxF func(*h.Request) (*url.URL, error),
 ) (p *Proxy, e error) {
 	p = &Proxy{
 		clock:    clock,
 		contextV: v,
-	}
-
-	if parentProxy != nil {
-		if parentProxy.Scheme == "http" {
-			gp.RegisterDialerType(parentProxy.Scheme, newHTTPProxy)
-		}
-		wr := &dlWrap{dl: direct}
-		var dl gp.Dialer
-		dl, e = gp.FromURL(parentProxy, wr)
-		if e == nil {
-			p.connectDl = func(c context.Context, nt,
-				addr string) (n net.Conn, e error) {
-				wr.ctx = func() context.Context { return c }
-				n, e = dl.Dial(nt, addr)
-				return
-			}
-		}
-	} else {
-		p.connectDl = direct
-	}
-	if e == nil {
-		p.trans = &h.Transport{
-			Proxy: func(r *h.Request) (u *url.URL, e error) {
-				u = parentProxy
-				return
-			},
+		trans: &h.Transport{
+			Proxy:                 prxF,
 			DialContext:           direct,
 			MaxIdleConns:          maxIdleConns,
 			IdleConnTimeout:       idleConnTimeout,
 			TLSHandshakeTimeout:   tlsHandshakeTimeout,
 			ExpectContinueTimeout: expectContinueTimeout,
-		}
+		},
 	}
-
+	gp.RegisterDialerType("http", newHTTPProxy)
 	return
 }
 
@@ -107,6 +84,7 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 
 func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	r *h.Request) {
+	e := p.setIfParProxy(r)
 	destConn, e := p.connectDl(r.Context(), "tcp", r.Host)
 
 	var hijacker h.Hijacker
@@ -157,18 +135,6 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	}
 }
 
-func transferWg(wg *sync.WaitGroup,
-	dest io.Writer, src io.Reader) {
-	io.Copy(dest, src)
-	wg.Done()
-}
-
-func transfer(dest io.WriteCloser, src io.ReadCloser) {
-	io.Copy(dest, src)
-	dest.Close()
-	src.Close()
-}
-
 func (p *Proxy) handleHTTP(w h.ResponseWriter,
 	req *h.Request) {
 	resp, e := p.trans.RoundTrip(req)
@@ -180,6 +146,39 @@ func (p *Proxy) handleHTTP(w h.ResponseWriter,
 	} else {
 		h.Error(w, e.Error(), h.StatusServiceUnavailable)
 	}
+}
+
+func (p *Proxy) setIfParProxy(r *h.Request) (e error) {
+	prxURL, _ := p.trans.Proxy(r)
+	if prxURL != nil {
+		wr := &dlWrap{dl: p.trans.DialContext}
+		var dl gp.Dialer
+		dl, e = gp.FromURL(prxURL, wr)
+		if e == nil {
+			p.connectDl = func(c context.Context, nt,
+				addr string) (n net.Conn, e error) {
+				wr.ctx = func() context.Context { return c }
+				n, e = dl.Dial(nt, addr)
+				return
+			}
+		}
+	} else {
+		p.connectDl = p.trans.DialContext
+	}
+	// p.connectDl correctly set if there's a proxy
+	return
+}
+
+func transferWg(wg *sync.WaitGroup,
+	dest io.Writer, src io.Reader) {
+	io.Copy(dest, src)
+	wg.Done()
+}
+
+func transfer(dest io.WriteCloser, src io.ReadCloser) {
+	io.Copy(dest, src)
+	dest.Close()
+	src.Close()
 }
 
 func copyHeader(dst, src h.Header) {
