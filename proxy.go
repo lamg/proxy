@@ -6,6 +6,7 @@ import (
 	fh "github.com/valyala/fasthttp"
 	gp "golang.org/x/net/proxy"
 	"io"
+	"log"
 	"net"
 	h "net/http"
 	"net/url"
@@ -17,8 +18,10 @@ import (
 type Proxy struct {
 	clock     func() time.Time
 	trans     *h.Transport
-	connectDl ContextDialer
+	direct    ContextDialer
+	connectDl Dialer
 	contextV  ContextValueF
+	parent    ParentProxyF
 
 	fastCl *fh.Client
 }
@@ -41,7 +44,8 @@ type dlWrap struct {
 	dl  ContextDialer
 }
 
-func (d *dlWrap) Dial(nt, addr string) (c net.Conn, e error) {
+func (d *dlWrap) Dial(nt, addr string) (c net.Conn,
+	e error) {
 	c, e = d.dl(d.ctx(), nt, addr)
 	return
 }
@@ -51,13 +55,19 @@ func NewProxy(direct ContextDialer, v ContextValueF,
 	idleConnTimeout, tlsHandshakeTimeout,
 	expectContinueTimeout time.Duration,
 	clock func() time.Time,
-	prxF func(*h.Request) (*url.URL, error),
-) (p *Proxy, e error) {
+	prxF ParentProxyF,
+) (p *Proxy) {
 	p = &Proxy{
 		clock:    clock,
 		contextV: v,
+		direct:   direct,
 		trans: &h.Transport{
-			Proxy:                 prxF,
+			Proxy: func(r *h.Request) (u *url.URL,
+				e error) {
+				u, e = prxF(r.Method, r.URL.String(),
+					r.RemoteAddr, clock())
+				return
+			},
 			DialContext:           direct,
 			MaxIdleConns:          maxIdleConns,
 			IdleConnTimeout:       idleConnTimeout,
@@ -71,21 +81,22 @@ func NewProxy(direct ContextDialer, v ContextValueF,
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
-	ctx := r.Context()
-	nctx := p.contextV(ctx, r.Method, r.URL.String(),
-		r.RemoteAddr, p.clock())
-	cr := r.WithContext(nctx)
+	p.setStdDl(r.Context(), r.Method, r.URL.String(),
+		r.RemoteAddr)
 	if r.Method == h.MethodConnect {
-		p.handleTunneling(w, cr)
+		p.handleTunneling(w, r)
 	} else {
-		p.handleHTTP(w, cr)
+		p.handleHTTP(w, r)
 	}
 }
 
+var (
+	clientConnectOK = []byte("HTTP/1.0 200 OK\r\n\r\n")
+)
+
 func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	r *h.Request) {
-	e := p.setIfParProxy(r)
-	destConn, e := p.connectDl(r.Context(), "tcp", r.Host)
+	destConn, e := p.connectDl("tcp", r.Host)
 
 	var hijacker h.Hijacker
 	status := h.StatusOK
@@ -106,26 +117,7 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter,
 		status = h.StatusInternalServerError
 	}
 	if e == nil {
-		// learning from https://github.com/elazarl/goproxy
-		// /blob/2ce16c963a8ac5bd6af851d4877e38701346983f
-		// /https.go#L103
-		clientConn.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
-		clientTCP, cok := clientConn.(*net.TCPConn)
-		destTCP, dok := destConn.(*net.TCPConn)
-		if cok && dok {
-			go transfer(destTCP, clientTCP)
-			go transfer(clientTCP, destTCP)
-		} else {
-			go func() {
-				var wg sync.WaitGroup
-				wg.Add(2)
-				go transferWg(&wg, destConn, clientConn)
-				go transferWg(&wg, clientConn, destConn)
-				wg.Wait()
-				clientConn.Close()
-				destConn.Close()
-			}()
-		}
+		copyConns(destConn, clientConn)
 	} else {
 		status = h.StatusServiceUnavailable
 	}
@@ -148,25 +140,52 @@ func (p *Proxy) handleHTTP(w h.ResponseWriter,
 	}
 }
 
-func (p *Proxy) setIfParProxy(r *h.Request) (e error) {
-	prxURL, _ := p.trans.Proxy(r)
+func (p *Proxy) setStdDl(c context.Context,
+	meth, ürl, rAddr string) {
+	t := p.clock()
+	ctx := p.contextV(c, meth, ürl, rAddr, t)
+	prxURL, e := p.parent(meth, ürl, rAddr, t)
+	if e != nil {
+		log.Print(e.Error())
+	}
+	wr := &dlWrap{
+		ctx: func() context.Context { return ctx },
+		dl:  p.direct,
+	}
+	p.connectDl = wr.Dial
 	if prxURL != nil {
-		wr := &dlWrap{dl: p.trans.DialContext}
-		var dl gp.Dialer
-		dl, e = gp.FromURL(prxURL, wr)
+		prxDl, e := gp.FromURL(prxURL, wr)
 		if e == nil {
-			p.connectDl = func(c context.Context, nt,
-				addr string) (n net.Conn, e error) {
-				wr.ctx = func() context.Context { return c }
-				n, e = dl.Dial(nt, addr)
-				return
-			}
+			p.connectDl = prxDl.Dial
+		} else {
+			log.Print(e.Error())
 		}
-	} else {
-		p.connectDl = p.trans.DialContext
 	}
 	// p.connectDl correctly set if there's a proxy
 	return
+}
+
+func copyConns(dest, client net.Conn) {
+	// learning from https://github.com/elazarl/goproxy
+	// /blob/2ce16c963a8ac5bd6af851d4877e38701346983f
+	// /https.go#L103
+	client.Write(clientConnectOK)
+	clientTCP, cok := client.(*net.TCPConn)
+	destTCP, dok := dest.(*net.TCPConn)
+	if cok && dok {
+		go transfer(destTCP, clientTCP)
+		go transfer(clientTCP, destTCP)
+	} else {
+		go func() {
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go transferWg(&wg, dest, client)
+			go transferWg(&wg, client, dest)
+			wg.Wait()
+			client.Close()
+			dest.Close()
+		}()
+	}
 }
 
 func transferWg(wg *sync.WaitGroup,
@@ -181,8 +200,8 @@ func transfer(dest io.WriteCloser, src io.ReadCloser) {
 	src.Close()
 }
 
-func copyHeader(dst, src h.Header) {
-	// hbh: hop-by-hop headers. Shouldn't be sent to the
+func searchHopByHop(hd string) (ok bool) {
+	// hop-by-hop headers. Shouldn't be sent to the
 	// requested host.
 	// https://developer.mozilla.org/en-US/docs/
 	// Web/HTTP/Headers#hbh
@@ -191,13 +210,18 @@ func copyHeader(dst, src h.Header) {
 		"Proxy-Authorization", "TE", "Trailer",
 		"Transfer-Encoding", "Upgrade",
 	}
+	ib := func(i int) (b bool) {
+		b = hbh[i] == hd
+		return
+	}
+	ok, _ = bLnSrch(ib, len(hbh))
+	return
+}
+
+func copyHeader(dst, src h.Header) {
 	for k, vv := range src {
-		f, i := false, 0
-		// f: found in hbh
-		for !f && i != len(hbh) {
-			f, i = k == hbh[i], i+1
-		}
-		if !f {
+		ok := searchHopByHop(k)
+		if !ok {
 			for _, v := range vv {
 				dst.Add(k, v)
 			}
@@ -208,5 +232,24 @@ func copyHeader(dst, src h.Header) {
 // NoHijacking error
 func NoHijacking() (e error) {
 	e = fmt.Errorf("No hijacking supported")
+	return
+}
+
+type intBool func(int) bool
+
+// bLnSrch is the bounded lineal search algorithm
+// { n ≥ 0 ∧ forall.n.(def.ib) }
+// { i =⟨↑j: 0 ≤ j ≤ n ∧ ⟨∀k: 0 ≤ k < j: ¬ib.k⟩: j⟩
+//   ∧ b ≡ i ≠ n }
+func bLnSrch(ib intBool, n int) (b bool, i int) {
+	b, i, udb := false, 0, true
+	// udb: undefined b for i
+	for !b && i != n {
+		if udb {
+			b, udb = ib(i), false
+		} else {
+			i, udb = i+1, true
+		}
+	}
 	return
 }

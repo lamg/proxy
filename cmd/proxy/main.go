@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 
+	fh "github.com/valyala/fasthttp"
 	"log"
 	"net"
 	h "net/http"
@@ -17,15 +18,13 @@ import (
 
 func main() {
 	var addr, lrange, proxyURL string
-	var fastH, elazarl bool
+	var fastH bool
 	flag.StringVar(&addr, "a", ":8080", "Server address")
 	flag.StringVar(&lrange, "r", "127.0.0.1/32",
 		"CIDR range for listening")
 	flag.StringVar(&proxyURL, "p", "", "Proxy address")
 	flag.BoolVar(&fastH, "f", false,
 		"Use github.com/valyala/fasthttp")
-	flag.BoolVar(&elazarl, "e", false,
-		"Use github.com/elazarl/goproxy")
 	flag.Parse()
 
 	var e error
@@ -38,26 +37,39 @@ func main() {
 		rgs := []string{lrange}
 		ctxV, e = newRangeIPCtx(rgs)
 	}
-	var np *proxy.Proxy
 	if e == nil {
-		maxIdleConns := 100
-		idleConnTimeout := 90 * time.Second
-		tlsHandshakeTimeout := 10 * time.Second
-		expectContinueTimeout := time.Second
+		if fastH {
+			np := proxy.NewFastProxy(
+				dialContext,
+				ctxV.setVal,
+				time.Now,
+				func(meth, ürl, rAddr string,
+					t time.Time) (*url.URL, error) {
+					return u, nil
+				},
+			)
+			e = fh.ListenAndServe(addr, np.FastHandler)
+		} else {
+			maxIdleConns := 100
+			idleConnTimeout := 90 * time.Second
+			tlsHandshakeTimeout := 10 * time.Second
+			expectContinueTimeout := time.Second
 
-		np, e = proxy.NewProxy(
-			dialContext,
-			ctxV.setVal,
-			maxIdleConns,
-			idleConnTimeout,
-			tlsHandshakeTimeout,
-			expectContinueTimeout,
-			time.Now,
-			func(r *h.Request) (*url.URL, error) { return u, nil },
-		)
-	}
-	if e == nil {
-		e = standardSrv(np, addr)
+			np := proxy.NewProxy(
+				dialContext,
+				ctxV.setVal,
+				maxIdleConns,
+				idleConnTimeout,
+				tlsHandshakeTimeout,
+				expectContinueTimeout,
+				time.Now,
+				func(meth, ürl, rAddr string,
+					t time.Time) (*url.URL, error) {
+					return u, nil
+				},
+			)
+			e = standardSrv(np, addr)
+		}
 	}
 	if e != nil {
 		log.Fatal(e)
