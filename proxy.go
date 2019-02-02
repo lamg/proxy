@@ -61,6 +61,7 @@ func NewProxy(direct ContextDialer, v ContextValueF,
 		clock:    clock,
 		contextV: v,
 		direct:   direct,
+		parent:   prxF,
 		trans: &h.Transport{
 			Proxy: func(r *h.Request) (u *url.URL,
 				e error) {

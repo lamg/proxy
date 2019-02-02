@@ -18,7 +18,8 @@ type httpProxy struct {
 	forward  proxy.Dialer
 }
 
-func newHTTPProxy(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
+func newHTTPProxy(uri *url.URL,
+	forward proxy.Dialer) (proxy.Dialer, error) {
 	s := new(httpProxy)
 	s.host = uri.Host
 	s.forward = forward
@@ -31,7 +32,8 @@ func newHTTPProxy(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 	return s, nil
 }
 
-func (s *httpProxy) Dial(network, addr string) (net.Conn, error) {
+func (s *httpProxy) Dial(network,
+	addr string) (net.Conn, error) {
 	// Dial and create the https client connection.
 	c, err := s.forward.Dial("tcp", s.host)
 	if err != nil {
@@ -46,7 +48,8 @@ func (s *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	}
 	reqURL.Scheme = ""
 
-	req, err := http.NewRequest(http.MethodConnect, reqURL.String(), nil)
+	req, err := http.NewRequest(http.MethodConnect,
+		reqURL.String(), nil)
 	if err != nil {
 		c.Close()
 		return nil, err
@@ -66,14 +69,15 @@ func (s *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	resp, err := http.ReadResponse(bufio.NewReader(c), req)
 	if err != nil {
 		// TODO close resp body ?
-		resp.Body.Close()
+		//resp.Body.Close()
 		c.Close()
 		return nil, err
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		c.Close()
-		err = fmt.Errorf("Connect server using proxy error, StatusCode [%d]", resp.StatusCode)
+		err = fmt.Errorf("Connect server using proxy error,"+
+			"StatusCode [%d]", resp.StatusCode)
 		return nil, err
 	}
 
