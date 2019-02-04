@@ -17,8 +17,9 @@ type ParentProxyF func(string, string, string,
 	time.Time) (*url.URL, error)
 
 func NewFastProxy(direct ContextDialer,
-	v ContextValueF, clock func() time.Time,
-	prxF ParentProxyF) (p *Proxy) {
+	v ContextValueF, prxF ParentProxyF,
+	clock func() time.Time,
+) (p *Proxy) {
 	gp.RegisterDialerType("http", newHTTPProxy)
 	p = &Proxy{
 		direct:   direct,

@@ -50,12 +50,15 @@ func (d *dlWrap) Dial(nt, addr string) (c net.Conn,
 	return
 }
 
-func NewProxy(direct ContextDialer, v ContextValueF,
+func NewProxy(
+	direct ContextDialer,
+	v ContextValueF,
+	prxF ParentProxyF,
 	maxIdleConns int,
-	idleConnTimeout, tlsHandshakeTimeout,
+	idleConnTimeout,
+	tlsHandshakeTimeout,
 	expectContinueTimeout time.Duration,
 	clock func() time.Time,
-	prxF ParentProxyF,
 ) (p *Proxy) {
 	p = &Proxy{
 		clock:    clock,
