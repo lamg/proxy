@@ -2,7 +2,7 @@
 
 [![GoDoc](https://godoc.org/github.com/lamg/proxy?status.svg)](https://godoc.org/github.com/lamg/proxy)
 
-HTTP proxy that uses custom procedures for network dialing and parent proxy selection (HTTP or SOCKS5). It can be served using https://godoc.org/net/http#Server or https://godoc.org/github.com/valyala/fasthttp#Server
+HTTP proxy that uses custom procedures for network dialing and parent proxy selection (HTTP or SOCKS5). It can be served using [standard library server](https://godoc.org/net/http#Server) or [fasthttp server](https://godoc.org/github.com/valyala/fasthttp#Server)
 
 ## Usage
 
