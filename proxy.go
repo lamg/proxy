@@ -126,7 +126,7 @@ func (p *proxyS) handleTunneling(w h.ResponseWriter,
 		w.WriteHeader(status)
 		hijacker, ok = w.(h.Hijacker)
 		if !ok {
-			e = NoHijacking()
+			e = noHijacking()
 		}
 	} else {
 		status = h.StatusServiceUnavailable
