@@ -3,8 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	fh "github.com/valyala/fasthttp"
-	gp "golang.org/x/net/proxy"
 	"io"
 	"log"
 	"net"
@@ -12,10 +10,12 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	fh "github.com/valyala/fasthttp"
+	gp "golang.org/x/net/proxy"
 )
 
-// Proxy is an HTTP proxy
-type Proxy struct {
+type proxyS struct {
 	clock     func() time.Time
 	trans     *h.Transport
 	direct    ContextDialer
@@ -26,6 +26,10 @@ type Proxy struct {
 	fastCl *fh.Client
 }
 
+// ContextValueF is the signature of a procedure
+// that calculates a value and embeds it in the
+// returned context. This context is passed to the
+// supplied ContextDialer.
 type ContextValueF func(
 	context.Context,
 	string, // HTTP method
@@ -34,10 +38,20 @@ type ContextValueF func(
 	time.Time,
 ) context.Context
 
+// ContextDialer is the signature of a procedure
+// that creates network connections possibly taking
+// a value created by ContextValueF
 type ContextDialer func(context.Context, string,
 	string) (net.Conn, error)
 
+// Dialer is the procedure signature of net.Dial
 type Dialer func(string, string) (net.Conn, error)
+
+// ParentProxyF is the signature of a procedure that
+// calculates the parent HTTP proxy for processing a
+// request
+type ParentProxyF func(string, string, string,
+	time.Time) (*url.URL, error)
 
 type dlWrap struct {
 	ctx func() context.Context
@@ -50,6 +64,9 @@ func (d *dlWrap) Dial(nt, addr string) (c net.Conn,
 	return
 }
 
+// NewProxy creates a net/http.Handler ready to be used
+// as an HTTP/HTTPS proxy server in conjunction with
+// a net/http.Server
 func NewProxy(
 	direct ContextDialer,
 	v ContextValueF,
@@ -59,8 +76,8 @@ func NewProxy(
 	tlsHandshakeTimeout,
 	expectContinueTimeout time.Duration,
 	clock func() time.Time,
-) (p *Proxy) {
-	p = &Proxy{
+) (p h.Handler) {
+	p = &proxyS{
 		clock:    clock,
 		contextV: v,
 		direct:   direct,
@@ -83,7 +100,7 @@ func NewProxy(
 	return
 }
 
-func (p *Proxy) ServeHTTP(w h.ResponseWriter,
+func (p *proxyS) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
 	p.setStdDl(r.Context(), r.Method, r.URL.String(),
 		r.RemoteAddr)
@@ -98,7 +115,7 @@ var (
 	clientConnectOK = []byte("HTTP/1.0 200 OK\r\n\r\n")
 )
 
-func (p *Proxy) handleTunneling(w h.ResponseWriter,
+func (p *proxyS) handleTunneling(w h.ResponseWriter,
 	r *h.Request) {
 	destConn, e := p.connectDl("tcp", r.Host)
 
@@ -131,7 +148,7 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	}
 }
 
-func (p *Proxy) handleHTTP(w h.ResponseWriter,
+func (p *proxyS) handleHTTP(w h.ResponseWriter,
 	req *h.Request) {
 	resp, e := p.trans.RoundTrip(req)
 	if e == nil {
@@ -144,7 +161,7 @@ func (p *Proxy) handleHTTP(w h.ResponseWriter,
 	}
 }
 
-func (p *Proxy) setStdDl(c context.Context,
+func (p *proxyS) setStdDl(c context.Context,
 	meth, ürl, rAddr string) {
 	t := p.clock()
 	ctx := p.contextV(c, meth, ürl, rAddr, t)

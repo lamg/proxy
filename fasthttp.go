@@ -2,26 +2,27 @@ package proxy
 
 import (
 	"context"
-	fh "github.com/valyala/fasthttp"
-	gp "golang.org/x/net/proxy"
 	"io"
 	"log"
 	"net"
 	h "net/http"
-	"net/url"
 	"sync"
 	"time"
+
+	fh "github.com/valyala/fasthttp"
+	gp "golang.org/x/net/proxy"
 )
 
-type ParentProxyF func(string, string, string,
-	time.Time) (*url.URL, error)
-
+// NewFastProxy creates a
+// github.com/valyala/fasthttp.RequestHandler ready to be
+// used as an HTTP/HTTPS proxy server, in conjunction with
+// a github.com/valyala/fasthttp.Server
 func NewFastProxy(direct ContextDialer,
 	v ContextValueF, prxF ParentProxyF,
 	clock func() time.Time,
-) (p *Proxy) {
+) (hn fh.RequestHandler) {
 	gp.RegisterDialerType("http", newHTTPProxy)
-	p = &Proxy{
+	p := &proxyS{
 		direct:   direct,
 		contextV: v,
 		fastCl: &fh.Client{
@@ -30,10 +31,11 @@ func NewFastProxy(direct ContextDialer,
 		clock:  clock,
 		parent: prxF,
 	}
+	hn = p.fastHandler
 	return
 }
 
-func (p *Proxy) FastHandler(ctx *fh.RequestCtx) {
+func (p *proxyS) fastHandler(ctx *fh.RequestCtx) {
 	p.setFastDl(
 		ctx,
 		string(ctx.Request.Header.Method()),
@@ -82,7 +84,7 @@ func copyFastHd(resp *fh.ResponseHeader,
 	})
 }
 
-func (p *Proxy) setFastDl(ctx context.Context, method, ürl,
+func (p *proxyS) setFastDl(ctx context.Context, method, ürl,
 	rAddr string) {
 	t := p.clock()
 	nctx := p.contextV(ctx, method, ürl, rAddr, t)

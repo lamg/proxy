@@ -6,12 +6,13 @@ import (
 	"flag"
 	"fmt"
 
-	fh "github.com/valyala/fasthttp"
 	"log"
 	"net"
 	h "net/http"
 	"net/url"
 	"time"
+
+	fh "github.com/valyala/fasthttp"
 
 	"github.com/lamg/proxy"
 )
@@ -42,13 +43,13 @@ func main() {
 			np := proxy.NewFastProxy(
 				dialContext,
 				ctxV.setVal,
-				time.Now,
 				func(meth, ürl, rAddr string,
 					t time.Time) (*url.URL, error) {
 					return u, nil
 				},
+				time.Now,
 			)
-			e = fh.ListenAndServe(addr, np.FastHandler)
+			e = fh.ListenAndServe(addr, np)
 		} else {
 			maxIdleConns := 100
 			idleConnTimeout := 90 * time.Second
@@ -58,15 +59,15 @@ func main() {
 			np := proxy.NewProxy(
 				dialContext,
 				ctxV.setVal,
+				func(meth, ürl, rAddr string,
+					t time.Time) (*url.URL, error) {
+					return u, nil
+				},
 				maxIdleConns,
 				idleConnTimeout,
 				tlsHandshakeTimeout,
 				expectContinueTimeout,
 				time.Now,
-				func(meth, ürl, rAddr string,
-					t time.Time) (*url.URL, error) {
-					return u, nil
-				},
 			)
 			e = standardSrv(np, addr)
 		}
@@ -76,10 +77,10 @@ func main() {
 	}
 }
 
-func standardSrv(p *proxy.Proxy, addr string) (e error) {
+func standardSrv(hn h.Handler, addr string) (e error) {
 	server := &h.Server{
 		Addr:         addr,
-		Handler:      p,
+		Handler:      hn,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		// Disable HTTP/2.
