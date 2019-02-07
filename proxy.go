@@ -250,8 +250,8 @@ func copyHeader(dst, src h.Header) {
 	}
 }
 
-// NoHijacking error
-func NoHijacking() (e error) {
+// noHijacking error
+func noHijacking() (e error) {
 	e = fmt.Errorf("No hijacking supported")
 	return
 }
