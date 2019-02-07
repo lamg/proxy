@@ -6,7 +6,7 @@ HTTP proxy that uses custom procedures for network dialing and parent proxy sele
 
 ## Usage
 
-The command line program at [proxy](cmd/proxy) is a simple example of how to use the library. With Go 1.11 or superior install with:
+The command line program at [cmd/proxy](cmd/proxy) is a simple example of how to use the library. With Go 1.11 or superior install with:
 
 ```sh
 git clone git@github.com:lamg/proxy.git
