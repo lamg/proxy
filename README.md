@@ -1,5 +1,14 @@
-# Introduction
+# Proxy
 
 [![GoDoc](https://godoc.org/github.com/lamg/proxy?status.svg)](https://godoc.org/github.com/lamg/proxy)
 
-This is a simple HTTP proxy library made with Go, taking the article https://medium.com/@mlowicki/http-s-proxy-in-golang-in-less-than-100-lines-of-code-6a51c2f2c38c as starting point.
+HTTP proxy that uses custom procedures for network dialing and parent proxy selection (HTTP or SOCKS5). It can be served using https://godoc.org/net/http#Server or https://godoc.org/github.com/valyala/fasthttp#Server
+
+## Usage
+
+The command line program at [](cmd/proxy) is a simple example of how to use the library. With Go 1.11 or superior install with:
+
+```sh
+git clone git@github.com:lamg/proxy.git
+cd proxy/cmd/proxy && go install
+```
