@@ -32,6 +32,10 @@ func main() {
 	var u *url.URL
 	if proxyURL != "" {
 		u, e = url.Parse(proxyURL)
+		if !(u.Scheme == "http" || u.Scheme == "socks5") {
+			e = fmt.Errorf("Not recognized URL scheme '%s', "+
+				"must be 'http' or 'socks5'", u.Scheme)
+		}
 	}
 	var ctxV *rangeIPCtx
 	if e == nil {
