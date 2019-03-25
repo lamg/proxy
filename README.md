@@ -1,8 +1,8 @@
 # Proxy
 
-[![GoDoc][0]][1] [![Go Report Card](https://goreportcard.com/badge/github.com/lamg/proxy)](https://goreportcard.com/report/github.com/lamg/proxy)
+[![GoDoc][0]][1] [![Go Report Card][2]][3]
 
-HTTP proxy that uses custom procedures for network dialing and parent proxy selection (HTTP or SOCKS5). It can be served using [standard library server](https://godoc.org/net/http#Server) or [fasthttp server](https://godoc.org/github.com/valyala/fasthttp#Server)
+HTTP proxy that uses custom procedures for network dialing and parent proxy selection (HTTP or SOCKS5). It can be served using [standard library server][4] or [fasthttp server][5]
 
 ## Usage
 
@@ -15,3 +15,9 @@ cd proxy/cmd/proxy && go install
 
 [0]: https://godoc.org/github.com/lamg/proxy?status.svg
 [1]: https://godoc.org/github.com/lamg/proxy
+
+[2]: https://goreportcard.com/badge/github.com/lamg/proxy
+[3]: https://goreportcard.com/report/github.com/lamg/proxy
+
+[4]: https://godoc.org/net/http#Server
+[5]: https://godoc.org/github.com/valyala/fasthttp#Server
