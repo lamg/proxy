@@ -24,7 +24,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	h "net/http"
 	"net/url"
@@ -36,98 +35,61 @@ import (
 )
 
 type proxyS struct {
-	clock     func() time.Time
-	trans     *h.Transport
-	direct    ContextDialer
-	connectDl Dialer
-	contextV  ContextValueF
-	parent    ParentProxyF
+	clock      func() time.Time
+	setContext func(context.Context, string, string, string,
+		time.Time) context.Context
+	params  func(context.Context) *ConnParams
+	apply   func(net.Conn, []string) net.Conn
+	timeout time.Duration
 
+	trans  *h.Transport
 	fastCl *fh.Client
-}
-
-// ContextValueF is the signature of a procedure
-// that calculates a value and embeds it in the
-// returned context. This context is passed to the
-// supplied ContextDialer.
-type ContextValueF func(
-	context.Context,
-	string, // HTTP method
-	string, // URL
-	string, // Remote address
-	time.Time,
-) context.Context
-
-// ContextDialer is the signature of a procedure
-// that creates network connections possibly taking
-// a value created by ContextValueF
-type ContextDialer func(context.Context, string,
-	string) (net.Conn, error)
-
-// Dialer is the procedure signature of net.Dial
-type Dialer func(string, string) (net.Conn, error)
-
-// ParentProxyF is the signature of a procedure that
-// calculates the parent HTTP proxy for processing a
-// request
-type ParentProxyF func(string, string, string,
-	time.Time) (*url.URL, error)
-
-type dlWrap struct {
-	ctx func() context.Context
-	dl  ContextDialer
-}
-
-func (d *dlWrap) Dial(nt, addr string) (c net.Conn,
-	e error) {
-	c, e = d.dl(d.ctx(), nt, addr)
-	return
 }
 
 // NewProxy creates a net/http.Handler ready to be used
 // as an HTTP/HTTPS proxy server in conjunction with
 // a net/http.Server
 func NewProxy(
-	direct ContextDialer,
-	v ContextValueF,
-	prxF ParentProxyF,
+	setCtx func(context.Context, string, string, string,
+		time.Time) context.Context,
+	params func(context.Context) *ConnParams,
+	apply func(net.Conn, []string) net.Conn,
+	dialTimeout time.Duration,
 	maxIdleConns int,
 	idleConnTimeout,
 	tlsHandshakeTimeout,
 	expectContinueTimeout time.Duration,
 	clock func() time.Time,
 ) (p h.Handler) {
-	p = &proxyS{
-		clock:    clock,
-		contextV: v,
-		direct:   direct,
-		parent:   prxF,
+	prx := &proxyS{
+		clock:      clock,
+		setContext: setCtx,
+		params:     params,
+		apply:      apply,
+		timeout:    dialTimeout,
 		trans: &h.Transport{
-			Proxy: func(r *h.Request) (u *url.URL,
-				e error) {
-				u, e = prxF(r.Method, r.URL.String(),
-					r.RemoteAddr, clock())
-				return
-			},
-			DialContext:           direct,
 			MaxIdleConns:          maxIdleConns,
 			IdleConnTimeout:       idleConnTimeout,
 			TLSHandshakeTimeout:   tlsHandshakeTimeout,
 			ExpectContinueTimeout: expectContinueTimeout,
 		},
 	}
+	prx.trans.DialContext = prx.dialContext
 	gp.RegisterDialerType("http", newHTTPProxy)
+	p = prx
 	return
 }
 
 func (p *proxyS) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
-	p.setStdDl(r.Context(), r.Method, r.URL.String(),
-		r.RemoteAddr)
+	t := p.clock()
+	nctx := p.setContext(r.Context(), r.Method, r.URL.String(),
+		r.RemoteAddr, t)
+	nr := r.WithContext(nctx)
 	if r.Method == h.MethodConnect {
-		p.handleTunneling(w, r)
+		p.handleTunneling(w, nr)
 	} else {
-		p.handleHTTP(w, r)
+		p.handleHTTP(w, nr)
 	}
 }
 
@@ -137,7 +99,7 @@ var (
 
 func (p *proxyS) handleTunneling(w h.ResponseWriter,
 	r *h.Request) {
-	destConn, e := p.connectDl("tcp", r.Host)
+	destConn, e := p.dialContext(r.Context(), "tcp", r.Host)
 
 	var hijacker h.Hijacker
 	status := h.StatusOK
@@ -181,28 +143,51 @@ func (p *proxyS) handleHTTP(w h.ResponseWriter,
 	}
 }
 
-func (p *proxyS) setStdDl(c context.Context,
-	meth, ürl, rAddr string) {
-	t := p.clock()
-	ctx := p.contextV(c, meth, ürl, rAddr, t)
-	prxURL, e := p.parent(meth, ürl, rAddr, t)
-	if e != nil {
-		log.Print(e.Error())
-	}
-	wr := &dlWrap{
-		ctx: func() context.Context { return ctx },
-		dl:  p.direct,
-	}
-	p.connectDl = wr.Dial
-	if prxURL != nil {
-		prxDl, e := gp.FromURL(prxURL, wr)
-		if e == nil {
-			p.connectDl = prxDl.Dial
-		} else {
-			log.Print(e.Error())
+type ConnParams struct {
+	Iface       string
+	ParentProxy *url.URL
+	Modifiers   []string
+	Error       error
+}
+
+func (p *proxyS) dialContext(ctx context.Context, network,
+	addr string) (c net.Conn, e error) {
+	cp := p.params(ctx)
+	if cp != nil && cp.Error == nil {
+		dlr := &net.Dialer{
+			Timeout: p.timeout,
 		}
+		if cp.Iface != "" {
+			var nf *net.Interface
+			nf, e = net.InterfaceByName(cp.Iface)
+			var laddr []net.Addr
+			if e == nil {
+				laddr, e = nf.Addrs()
+			}
+			if len(laddr) != 0 {
+				dlr.LocalAddr = &net.TCPAddr{IP: laddr[0].(*net.IPNet).IP}
+			} else {
+				e = fmt.Errorf("No local IP")
+			}
+		}
+		var n net.Conn
+		if cp.ParentProxy != nil {
+			var d gp.Dialer
+			d, e = gp.FromURL(cp.ParentProxy, dlr)
+			if e == nil {
+				n, e = d.Dial(network, addr)
+			}
+		} else {
+			n, e = dlr.Dial(network, addr)
+		}
+		if e == nil {
+			c = p.apply(n, cp.Modifiers)
+		}
+	} else if cp != nil && cp.Error != nil {
+		e = cp.Error
+	} else {
+		e = fmt.Errorf("No connection parameters in context")
 	}
-	// p.connectDl correctly set if there's a proxy
 	return
 }
 

@@ -23,7 +23,6 @@ package proxy
 import (
 	"context"
 	"io"
-	"log"
 	"net"
 	h "net/http"
 	"sync"
@@ -37,31 +36,40 @@ import (
 // github.com/valyala/fasthttp.RequestHandler ready to be
 // used as an HTTP/HTTPS proxy server, in conjunction with
 // a github.com/valyala/fasthttp.Server
-func NewFastProxy(direct ContextDialer,
-	v ContextValueF, prxF ParentProxyF,
+func NewFastProxy(
+	setCtx func(context.Context, string, string, string,
+		time.Time) context.Context,
+	params func(context.Context) *ConnParams,
+	apply func(net.Conn, []string) net.Conn,
+	dialTimeout time.Duration,
 	clock func() time.Time,
 ) (hn fh.RequestHandler) {
 	gp.RegisterDialerType("http", newHTTPProxy)
 	p := &proxyS{
-		direct:   direct,
-		contextV: v,
+		setContext: setCtx,
+		params:     params,
+		apply:      apply,
+		clock:      clock,
+		timeout:    dialTimeout,
 		fastCl: &fh.Client{
 			DialDualStack: true,
 		},
-		clock:  clock,
-		parent: prxF,
 	}
 	hn = p.fastHandler
 	return
 }
 
 func (p *proxyS) fastHandler(ctx *fh.RequestCtx) {
-	p.setFastDl(
-		ctx,
-		string(ctx.Request.Header.Method()),
+	t := p.clock()
+	nctx := p.setContext(ctx, string(ctx.Request.Header.Method()),
 		ctx.URI().String(),
 		ctx.RemoteAddr().String(),
+		t,
 	)
+	p.fastCl.Dial = func(addr string) (c net.Conn, e error) {
+		c, e = p.dialContext(nctx, "tcp", addr)
+		return
+	}
 	if ctx.IsConnect() {
 		dest, e := p.fastCl.Dial(string(ctx.Host()))
 		if e == nil {
@@ -102,37 +110,4 @@ func copyFastHd(resp *fh.ResponseHeader,
 			resp.Add(ks, string(v))
 		}
 	})
-}
-
-func (p *proxyS) setFastDl(ctx context.Context, method, ürl,
-	rAddr string) {
-	t := p.clock()
-	nctx := p.contextV(ctx, method, ürl, rAddr, t)
-	wr := &dlWrap{
-		ctx: func() context.Context { return nctx },
-		dl:  p.direct,
-	}
-	prxURL, e := p.parent(method, ürl, rAddr, t)
-	if e != nil {
-		log.Print(e.Error())
-	}
-	var fdl Dialer
-	if prxURL != nil {
-		dl, e := gp.FromURL(prxURL, wr)
-		if e == nil {
-			fdl = dl.Dial
-		} else {
-			log.Print(e.Error())
-		}
-	} else {
-		fdl = wr.Dial
-	}
-	if fdl != nil {
-		p.fastCl.Dial = func(addr string) (n net.Conn,
-			e error) {
-			n, e = fdl("tcp", addr)
-			return
-		}
-	}
-	return
 }

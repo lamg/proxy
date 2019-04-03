@@ -62,19 +62,16 @@ func main() {
 	var ctxV *rangeIPCtx
 	if e == nil {
 		rgs := []string{lrange}
-		ctxV, e = newRangeIPCtx(rgs)
+		ctxV, e = newRangeIPCtx(rgs, u)
 	}
 	if e == nil {
+		apply := func(n net.Conn, mods []string) (c net.Conn) {
+			c = n
+			return
+		}
 		if fastH {
-			np := proxy.NewFastProxy(
-				dialContext,
-				ctxV.setVal,
-				func(meth, ürl, rAddr string,
-					t time.Time) (*url.URL, error) {
-					return u, nil
-				},
-				time.Now,
-			)
+			np := proxy.NewFastProxy(ctxV.setContext, params, apply,
+				90*time.Second, time.Now)
 			e = fh.ListenAndServe(addr, np)
 		} else {
 			maxIdleConns := 100
@@ -83,12 +80,10 @@ func main() {
 			expectContinueTimeout := time.Second
 
 			np := proxy.NewProxy(
-				dialContext,
-				ctxV.setVal,
-				func(meth, ürl, rAddr string,
-					t time.Time) (*url.URL, error) {
-					return u, nil
-				},
+				ctxV.setContext,
+				params,
+				apply,
+				idleConnTimeout,
 				maxIdleConns,
 				idleConnTimeout,
 				tlsHandshakeTimeout,
@@ -118,11 +113,12 @@ func standardSrv(hn h.Handler, addr string) (e error) {
 }
 
 type rangeIPCtx struct {
-	iprgs []*net.IPNet
+	parentProxy *url.URL
+	iprgs       []*net.IPNet
 }
 
-func newRangeIPCtx(cidrs []string) (n *rangeIPCtx,
-	e error) {
+func newRangeIPCtx(cidrs []string,
+	parentProxy *url.URL) (n *rangeIPCtx, e error) {
 	iprgs := make([]*net.IPNet, len(cidrs))
 	ib := func(i int) (b bool) {
 		var e error
@@ -133,7 +129,8 @@ func newRangeIPCtx(cidrs []string) (n *rangeIPCtx,
 	bLnSrch(ib, len(cidrs))
 	if e == nil {
 		n = &rangeIPCtx{
-			iprgs: iprgs,
+			iprgs:       iprgs,
+			parentProxy: parentProxy,
 		}
 	}
 	return
@@ -143,12 +140,7 @@ type keyT string
 
 var key = keyT("error")
 
-type errV struct {
-	isNil bool
-	e     error
-}
-
-func (n *rangeIPCtx) setVal(ctx context.Context,
+func (n *rangeIPCtx) setContext(ctx context.Context,
 	method, url, rAddr string,
 	t time.Time) (nctx context.Context) {
 	host, _, e := net.SplitHostPort(rAddr)
@@ -168,21 +160,12 @@ func (n *rangeIPCtx) setVal(ctx context.Context,
 		}
 	}
 	nctx = context.WithValue(ctx, key,
-		&errV{isNil: e == nil, e: e})
+		&proxy.ConnParams{ParentProxy: n.parentProxy, Error: e})
 	return
 }
 
-func dialContext(ctx context.Context, network,
-	addr string) (c net.Conn, e error) {
-	err, ok := ctx.Value(key).(*errV)
-	if !ok {
-		e = fmt.Errorf("No error value with key %s", key)
-	} else {
-		e = err.e
-	}
-	if e == nil {
-		c, e = net.Dial(network, addr)
-	}
+func params(ctx context.Context) (p *proxy.ConnParams) {
+	p = ctx.Value(key).(*proxy.ConnParams)
 	return
 }
 
