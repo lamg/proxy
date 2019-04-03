@@ -2,7 +2,7 @@
 
 [![GoDoc][0]][1] [![Go Report Card][2]][3]
 
-HTTP proxy that uses custom procedures for network dialing and parent proxy selection (HTTP or SOCKS5). It can be served using [standard library server][4] or [fasthttp server][5]
+HTTP proxy that dials connections according parameters determined by request method, URL, remote address and time. These parameters include parent proxy (HTTP or SOCKS5), and network interface. It can be served using [standard library server][4] or [fasthttp server][5]
 
 ## Usage
 
