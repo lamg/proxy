@@ -21,7 +21,6 @@
 package proxy
 
 import (
-	"context"
 	"io"
 	"net"
 	h "net/http"
@@ -37,10 +36,9 @@ import (
 // used as an HTTP/HTTPS proxy server, in conjunction with
 // a github.com/valyala/fasthttp.Server
 func NewFastProxy(
-	setCtx func(context.Context, string, string, string,
-		time.Time) context.Context,
-	params func(context.Context) *ConnParams,
-	apply func(net.Conn, []string) net.Conn,
+	setCtx Modify,
+	params Extract,
+	apply Wrapper,
 	dialTimeout time.Duration,
 	clock func() time.Time,
 ) (hn fh.RequestHandler) {

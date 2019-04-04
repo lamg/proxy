@@ -46,14 +46,18 @@ type proxyS struct {
 	fastCl *fh.Client
 }
 
+type Modify func(context.Context, string, string, string,
+	time.Time) context.Context
+type Extract func(context.Context) *ConnParams
+type Wrapper func(net.Conn, []string) net.Conn
+
 // NewProxy creates a net/http.Handler ready to be used
 // as an HTTP/HTTPS proxy server in conjunction with
 // a net/http.Server
 func NewProxy(
-	setCtx func(context.Context, string, string, string,
-		time.Time) context.Context,
-	params func(context.Context) *ConnParams,
-	apply func(net.Conn, []string) net.Conn,
+	setCtx Modify,
+	params Extract,
+	apply Wrapper,
 	dialTimeout time.Duration,
 	maxIdleConns int,
 	idleConnTimeout,
