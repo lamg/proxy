@@ -36,11 +36,10 @@ import (
 
 type proxyS struct {
 	clock      func() time.Time
-	setContext func(context.Context, string, string, string,
-		time.Time) context.Context
-	params  func(context.Context) *ConnParams
-	apply   func(net.Conn, []string) net.Conn
-	timeout time.Duration
+	setContext Modify
+	params     Extract
+	apply      Wrapper
+	timeout    time.Duration
 
 	trans  *h.Transport
 	fastCl *fh.Client
@@ -49,7 +48,7 @@ type proxyS struct {
 type Modify func(context.Context, string, string, string,
 	time.Time) context.Context
 type Extract func(context.Context) *ConnParams
-type Wrapper func(net.Conn, []string) net.Conn
+type Wrapper func(net.Conn, string, []string) (net.Conn, error)
 
 // NewProxy creates a net/http.Handler ready to be used
 // as an HTTP/HTTPS proxy server in conjunction with
@@ -87,9 +86,11 @@ func NewProxy(
 func (p *proxyS) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
 	t := p.clock()
-	nctx := p.setContext(r.Context(), r.Method, r.URL.String(),
+	c0 := p.setContext(r.Context(), r.Method, r.URL.String(),
 		r.RemoteAddr, t)
-	nr := r.WithContext(nctx)
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	c1 := context.WithValue(c0, ipK, ip)
+	nr := r.WithContext(c1)
 	if r.Method == h.MethodConnect {
 		p.handleTunneling(w, nr)
 	} else {
@@ -154,9 +155,14 @@ type ConnParams struct {
 	Error       error
 }
 
+type ipKT string
+
+var ipK = ipKT("ip")
+
 func (p *proxyS) dialContext(ctx context.Context, network,
 	addr string) (c net.Conn, e error) {
 	cp := p.params(ctx)
+	clientIP := ctx.Value(ipK).(string)
 	if cp != nil && cp.Error == nil {
 		dlr := &net.Dialer{
 			Timeout: p.timeout,
@@ -185,7 +191,7 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 			n, e = dlr.Dial(network, addr)
 		}
 		if e == nil {
-			c = p.apply(n, cp.Modifiers)
+			c, e = p.apply(n, clientIP, cp.Modifiers)
 		}
 	} else if cp != nil && cp.Error != nil {
 		e = cp.Error

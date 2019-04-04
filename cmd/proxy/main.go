@@ -65,7 +65,8 @@ func main() {
 		ctxV, e = newRangeIPCtx(rgs, u)
 	}
 	if e == nil {
-		apply := func(n net.Conn, mods []string) (c net.Conn) {
+		apply := func(n net.Conn, clientIP string,
+			mods []string) (c net.Conn, e error) {
 			c = n
 			return
 		}

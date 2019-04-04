@@ -21,6 +21,7 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net"
 	h "net/http"
@@ -59,13 +60,16 @@ func NewFastProxy(
 
 func (p *proxyS) fastHandler(ctx *fh.RequestCtx) {
 	t := p.clock()
-	nctx := p.setContext(ctx, string(ctx.Request.Header.Method()),
+	raddr := ctx.RemoteAddr().String()
+	c0 := p.setContext(ctx, string(ctx.Request.Header.Method()),
 		ctx.URI().String(),
-		ctx.RemoteAddr().String(),
+		raddr,
 		t,
 	)
+	ip, _, _ := net.SplitHostPort(raddr)
+	c1 := context.WithValue(c0, ipK, ip)
 	p.fastCl.Dial = func(addr string) (c net.Conn, e error) {
-		c, e = p.dialContext(nctx, "tcp", addr)
+		c, e = p.dialContext(c1, "tcp", addr)
 		return
 	}
 	if ctx.IsConnect() {
