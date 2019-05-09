@@ -45,9 +45,19 @@ type proxyS struct {
 	fastCl *fh.Client
 }
 
+// Modify is the signature of the function that sets the context value
+// according request method, request url, request remote address
+// and time.
 type Modify func(context.Context, string, string, string,
 	time.Time) context.Context
+
+// Extract is the signature of the function that extracts the
+// *ConnParams value from the context set by the function with
+// the signature of Modify
 type Extract func(context.Context) *ConnParams
+
+// Wrapper is the signature of the function for wrapping a connection
+// given the client IP and a slice of modifiers to be applied
 type Wrapper func(net.Conn, string, []string) (net.Conn, error)
 
 // NewProxy creates a net/http.Handler ready to be used
@@ -148,6 +158,13 @@ func (p *proxyS) handleHTTP(w h.ResponseWriter,
 	}
 }
 
+// ConnParams is a value determined by the functions with Modify
+// and Extract signatures. Is used for dialing connections and
+// for wrapping the dialed connection, using the function with
+// Wrapper signature, with ConnParams.Modifiers. These are
+// implementations of the net.Conn interface that could make
+// slower the connection or limit the amount of data available to
+// download.
 type ConnParams struct {
 	Iface       string
 	ParentProxy *url.URL
