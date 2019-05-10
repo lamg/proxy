@@ -24,14 +24,14 @@ This is a proxy that denies all the connections coming from IP addresses outside
 ```go
 type keyT string
 var key = keyT("ok")
-```
 
-```go
-params := func(ctx context.Context) (p *proxy.ConnParams){
+func params (ctx context.Context) (p *proxy.ConnParams){
 	p = ctx.Value(key).(*proxy.ConnParams)
 	return
 }
+```
 
+```go
 rg, _ := net.ParseCIDR("192.168.1.0/24")
 modCtx := func(c context.Context, method, url, remoteAddr string, 
 		t time.Time) (nc context.Context){
