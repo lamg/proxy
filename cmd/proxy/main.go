@@ -23,7 +23,6 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -36,6 +35,7 @@ import (
 
 	fh "github.com/valyala/fasthttp"
 
+	alg "github.com/lamg/algorithms"
 	"github.com/lamg/proxy"
 )
 
@@ -59,19 +59,14 @@ func main() {
 				"must be 'http' or 'socks5'", u.Scheme)
 		}
 	}
-	var ctxV *rangeIPCtx
+	var rip proxy.IfaceParentProxy
 	if e == nil {
-		rgs := []string{lrange}
-		ctxV, e = newRangeIPCtx(rgs, u)
+		cidrs := []string{lrange}
+		rip, e = restrIPRange(cidrs, u)
 	}
 	if e == nil {
-		apply := func(n net.Conn, clientIP string,
-			mods []string) (c net.Conn, e error) {
-			c = n
-			return
-		}
 		if fastH {
-			np := proxy.NewFastProxy(ctxV.setContext, params, apply,
+			np := proxy.NewFastProxy(rip, proxy.UnrestrictedConn,
 				90*time.Second, time.Now)
 			e = fh.ListenAndServe(addr, np)
 		} else {
@@ -81,9 +76,8 @@ func main() {
 			expectContinueTimeout := time.Second
 
 			np := proxy.NewProxy(
-				ctxV.setContext,
-				params,
-				apply,
+				rip,
+				proxy.UnrestrictedConn,
 				idleConnTimeout,
 				maxIdleConns,
 				idleConnTimeout,
@@ -113,75 +107,31 @@ func standardSrv(hn h.Handler, addr string) (e error) {
 	return
 }
 
-type rangeIPCtx struct {
-	parentProxy *url.URL
-	iprgs       []*net.IPNet
-}
-
-func newRangeIPCtx(cidrs []string,
-	parentProxy *url.URL) (n *rangeIPCtx, e error) {
+func restrIPRange(cidrs []string,
+	prx *url.URL) (f proxy.IfaceParentProxy,
+	e error) {
 	iprgs := make([]*net.IPNet, len(cidrs))
 	ib := func(i int) (b bool) {
-		var e error
 		_, iprgs[i], e = net.ParseCIDR(cidrs[i])
 		b = e != nil
 		return
 	}
-	bLnSrch(ib, len(cidrs))
+	alg.BLnSrch(ib, len(cidrs))
 	if e == nil {
-		n = &rangeIPCtx{
-			iprgs:       iprgs,
-			parentProxy: parentProxy,
-		}
-	}
-	return
-}
-
-type keyT string
-
-var key = keyT("error")
-
-func (n *rangeIPCtx) setContext(ctx context.Context,
-	method, url, rAddr string,
-	t time.Time) (nctx context.Context) {
-	host, _, e := net.SplitHostPort(rAddr)
-	if e == nil {
-		ni := net.ParseIP(host)
-		if ni != nil {
-			ib := func(i int) (b bool) {
-				b = n.iprgs[i].Contains(ni)
-				return
+		f = func(meth, ürl, ip string, t time.Time) (iface string,
+			p *url.URL, d error) {
+			ni := net.ParseIP(ip)
+			if ni != nil {
+				ib := func(i int) bool { return iprgs[i].Contains(ni) }
+				ok, _ := alg.BLnSrch(ib, len(iprgs))
+				if !ok {
+					d = fmt.Errorf("Client IP '%s' out of range", ip)
+				}
+			} else {
+				d = fmt.Errorf("Error parsing client IP '%s'", ip)
 			}
-			ok, _ := bLnSrch(ib, len(n.iprgs))
-			if !ok {
-				e = fmt.Errorf("Host %s out of range", host)
-			}
-		} else {
-			e = fmt.Errorf("Error parsing host IP %s", host)
-		}
-	}
-	nctx = context.WithValue(ctx, key,
-		&proxy.ConnParams{ParentProxy: n.parentProxy, Error: e})
-	return
-}
-
-func params(ctx context.Context) (p *proxy.ConnParams) {
-	p = ctx.Value(key).(*proxy.ConnParams)
-	return
-}
-
-type intBool func(int) bool
-
-// bLnSrch is the bounded lineal search algorithm
-// { n ≥ 0 ∧ ⟨∀i: 0 ≤ i < n: def.(ib.i)⟩ }
-// { i = ⟨↑j: 0 ≤ j ≤ n ∧ ⟨∀k: 0 ≤ k < j: ¬ib.k⟩: j⟩ ∧
-//   b ≡ i ≠ n }
-func bLnSrch(ib intBool, n int) (b bool, i int) {
-	b, i = false, 0
-	for !b && i != n {
-		b = ib(i)
-		if !b {
-			i = i + 1
+			p = prx
+			return
 		}
 	}
 	return

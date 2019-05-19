@@ -30,43 +30,26 @@ import (
 	"sync"
 	"time"
 
+	alg "github.com/lamg/algorithms"
 	fh "github.com/valyala/fasthttp"
 	gp "golang.org/x/net/proxy"
 )
 
 type proxyS struct {
-	clock      func() time.Time
-	setContext Modify
-	params     Extract
-	apply      Wrapper
-	timeout    time.Duration
-
-	trans  *h.Transport
-	fastCl *fh.Client
+	clock   func() time.Time
+	timeout time.Duration
+	preConn IfaceParentProxy
+	ctlConn ControlConn
+	trans   *h.Transport
+	fastCl  *fh.Client
 }
-
-// Modify is the signature of the function that sets the context value
-// according request method, request url, request remote address
-// and time.
-type Modify func(context.Context, string, string, string,
-	time.Time) context.Context
-
-// Extract is the signature of the function that extracts the
-// *ConnParams value from the context set by the function with
-// the signature of Modify
-type Extract func(context.Context) *ConnParams
-
-// Wrapper is the signature of the function for wrapping a connection
-// given the client IP and a slice of modifiers to be applied
-type Wrapper func(net.Conn, string, []string) (net.Conn, error)
 
 // NewProxy creates a net/http.Handler ready to be used
 // as an HTTP/HTTPS proxy server in conjunction with
 // a net/http.Server
 func NewProxy(
-	setCtx Modify,
-	params Extract,
-	apply Wrapper,
+	preConn IfaceParentProxy,
+	ctlConn ControlConn,
 	dialTimeout time.Duration,
 	maxIdleConns int,
 	idleConnTimeout,
@@ -75,11 +58,10 @@ func NewProxy(
 	clock func() time.Time,
 ) (p h.Handler) {
 	prx := &proxyS{
-		clock:      clock,
-		setContext: setCtx,
-		params:     params,
-		apply:      apply,
-		timeout:    dialTimeout,
+		clock:   clock,
+		preConn: preConn,
+		ctlConn: ctlConn,
+		timeout: dialTimeout,
 		trans: &h.Transport{
 			MaxIdleConns:          maxIdleConns,
 			IdleConnTimeout:       idleConnTimeout,
@@ -93,14 +75,26 @@ func NewProxy(
 	return
 }
 
+type ifaceProxyKT string
+
+const ifaceProxyK = "ifaceProxyK"
+
+type ifaceProxy struct {
+	ip    string
+	iface string
+	proxy *url.URL
+	e     error
+}
+
 func (p *proxyS) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
 	t := p.clock()
-	c0 := p.setContext(r.Context(), r.Method, r.URL.String(),
-		r.RemoteAddr, t)
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	c1 := context.WithValue(c0, ipK, ip)
-	nr := r.WithContext(c1)
+	i := new(ifaceProxy)
+	i.ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+	i.iface, i.proxy, i.e = p.preConn(r.Method, r.URL.String(),
+		i.ip, t)
+	c := context.WithValue(r.Context(), ifaceProxyK, i)
+	nr := r.WithContext(c)
 	if r.Method == h.MethodConnect {
 		p.handleTunneling(w, nr)
 	} else {
@@ -158,35 +152,16 @@ func (p *proxyS) handleHTTP(w h.ResponseWriter,
 	}
 }
 
-// ConnParams is a value determined by the functions with Modify
-// and Extract signatures. Is used for dialing connections and
-// for wrapping the dialed connection, using the function with
-// Wrapper signature, with ConnParams.Modifiers. These are
-// implementations of the net.Conn interface that could make
-// slower the connection or limit the amount of data available to
-// download.
-type ConnParams struct {
-	Iface       string
-	ParentProxy *url.URL
-	Modifiers   []string
-	Error       error
-}
-
-type ipKT string
-
-var ipK = ipKT("ip")
-
 func (p *proxyS) dialContext(ctx context.Context, network,
 	addr string) (c net.Conn, e error) {
-	cp := p.params(ctx)
-	clientIP := ctx.Value(ipK).(string)
-	if cp != nil && cp.Error == nil {
+	ifpr := ctx.Value(ifaceProxyK).(*ifaceProxy)
+	if ifpr != nil && ifpr.e == nil {
 		dlr := &net.Dialer{
 			Timeout: p.timeout,
 		}
-		if cp.Iface != "" {
+		if ifpr.iface != "" {
 			var nf *net.Interface
-			nf, e = net.InterfaceByName(cp.Iface)
+			nf, e = net.InterfaceByName(ifpr.iface)
 			var laddr []net.Addr
 			if e == nil {
 				laddr, e = nf.Addrs()
@@ -198,9 +173,9 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 			}
 		}
 		var n net.Conn
-		if cp.ParentProxy != nil {
+		if ifpr.proxy != nil {
 			var d gp.Dialer
-			d, e = gp.FromURL(cp.ParentProxy, dlr)
+			d, e = gp.FromURL(ifpr.proxy, dlr)
 			if e == nil {
 				n, e = d.Dial(network, addr)
 			}
@@ -208,13 +183,33 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 			n, e = dlr.Dial(network, addr)
 		}
 		if e == nil {
-			c, e = p.apply(n, clientIP, cp.Modifiers)
+			c = &ctlConn{Conn: n, ip: ifpr.ip, ctl: p.ctlConn}
 		}
-	} else if cp != nil && cp.Error != nil {
-		e = cp.Error
+	} else if ifpr != nil && ifpr.e != nil {
+		e = ifpr.e
 	} else {
 		e = fmt.Errorf("No connection parameters in context")
 	}
+	return
+}
+
+type ctlConn struct {
+	net.Conn
+	ip  string
+	ctl ControlConn
+}
+
+func (c *ctlConn) Read(p []byte) (n int, e error) {
+	e = c.ctl(Request, c.ip, len(p))
+	if e == nil {
+		n, e = c.Conn.Read(p)
+		e = c.ctl(Report, c.ip, n)
+	}
+	return
+}
+
+func (c *ctlConn) Close() (e error) {
+	e = c.ctl(Close, c.ip, 0)
 	return
 }
 
@@ -267,7 +262,7 @@ func searchHopByHop(hd string) (ok bool) {
 		b = hbh[i] == hd
 		return
 	}
-	ok, _ = bLnSrch(ib, len(hbh))
+	ok, _ = alg.BLnSrch(ib, len(hbh))
 	return
 }
 
@@ -285,24 +280,5 @@ func copyHeader(dst, src h.Header) {
 // noHijacking error
 func noHijacking() (e error) {
 	e = fmt.Errorf("No hijacking supported")
-	return
-}
-
-type intBool func(int) bool
-
-// bLnSrch is the bounded lineal search algorithm
-// { n ≥ 0 ∧ forall.n.(def.ib) }
-// { i =⟨↑j: 0 ≤ j ≤ n ∧ ⟨∀k: 0 ≤ k < j: ¬ib.k⟩: j⟩
-//   ∧ b ≡ i ≠ n }
-func bLnSrch(ib intBool, n int) (b bool, i int) {
-	b, i, udb := false, 0, true
-	// udb: undefined b for i
-	for !b && i != n {
-		if udb {
-			b, udb = ib(i), false
-		} else {
-			i, udb = i+1, true
-		}
-	}
 	return
 }
