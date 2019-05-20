@@ -59,6 +59,9 @@ func main() {
 		}
 		e = server.ListenAndServe()
 	}
+	if e != nil {
+		log.Fatal(e)
+	}
 }
 
 func restrictedIPRange(cidrs []string) (f proxy.IfaceParentProxy,
