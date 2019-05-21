@@ -15,7 +15,7 @@ cd proxy/cmd/proxy && go install
 
 ## Usage
 
-The library uses the custom procedure, [ConnControl][6], for determining the network interface and parent proxy for making the connection, and for controlling the established connection's behavior. 
+The library uses the custom procedure [ConnControl][6], for determining the network interface and parent proxy for making the connection, and for controlling the established connection's behavior. 
 ## Example
 
 This is a proxy that denies all the connections coming from IP addresses outside a given range.
@@ -77,7 +77,10 @@ func restrictedIPRange(cidrs []string) (f proxy.ConnControl,
 			r = new(proxy.Result)
 			// if proxy.Open command is sent,
 			// a *proxy.Result.Error != nil means the connection will
-			// not be established
+			// not be established, and since the rest of the operations
+			// are performed if this is successful, there's no need to
+			// check them in this case where the connection's behavior
+			// is not controlled after it's established
 			if op.Command == proxy.Open {
 				ni := net.ParseIP(op.IP)
 				if ni != nil {
