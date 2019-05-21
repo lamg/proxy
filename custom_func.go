@@ -53,6 +53,11 @@ type Result struct {
 	// Proxy is the proxy URL for dialing the connection.
 	// This field is used only with the Open command
 	Proxy *url.URL
+	// Error not nil means the operation will not be performed
+	// by the connection. An error sent with the Open operation
+	// means the connection won't be opened, and therefore the
+	// rest of operations (ReadRequest, ReadReport, Close)
+	// won't be performed
 	Error error
 }
 
