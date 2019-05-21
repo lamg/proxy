@@ -59,15 +59,14 @@ func main() {
 				"must be 'http' or 'socks5'", u.Scheme)
 		}
 	}
-	var rip proxy.IfaceParentProxy
+	var rip proxy.ConnControl
 	if e == nil {
 		cidrs := []string{lrange}
 		rip, e = restrIPRange(cidrs, u)
 	}
 	if e == nil {
 		if fastH {
-			np := proxy.NewFastProxy(rip, proxy.UnrestrictedConn,
-				90*time.Second, time.Now)
+			np := proxy.NewFastProxy(rip, 90*time.Second, time.Now)
 			e = fh.ListenAndServe(addr, np)
 		} else {
 			maxIdleConns := 100
@@ -77,7 +76,6 @@ func main() {
 
 			np := proxy.NewProxy(
 				rip,
-				proxy.UnrestrictedConn,
 				idleConnTimeout,
 				maxIdleConns,
 				idleConnTimeout,
@@ -108,7 +106,7 @@ func standardSrv(hn h.Handler, addr string) (e error) {
 }
 
 func restrIPRange(cidrs []string,
-	prx *url.URL) (f proxy.IfaceParentProxy,
+	prx *url.URL) (f proxy.ConnControl,
 	e error) {
 	iprgs := make([]*net.IPNet, len(cidrs))
 	ib := func(i int) (b bool) {
@@ -118,19 +116,19 @@ func restrIPRange(cidrs []string,
 	}
 	alg.BLnSrch(ib, len(cidrs))
 	if e == nil {
-		f = func(meth, ürl, ip string, t time.Time) (iface string,
-			p *url.URL, d error) {
-			ni := net.ParseIP(ip)
+		f = func(op *proxy.Operation) (r *proxy.Result) {
+			r = &proxy.Result{Proxy: prx}
+			ni := net.ParseIP(op.IP)
 			if ni != nil {
 				ib := func(i int) bool { return iprgs[i].Contains(ni) }
 				ok, _ := alg.BLnSrch(ib, len(iprgs))
 				if !ok {
-					d = fmt.Errorf("Client IP '%s' out of range", ip)
+					r.Error = fmt.Errorf("Client IP '%s' out of range",
+						op.IP)
 				}
 			} else {
-				d = fmt.Errorf("Error parsing client IP '%s'", ip)
+				r.Error = fmt.Errorf("Error parsing client IP '%s'", op.IP)
 			}
-			p = prx
 			return
 		}
 	}

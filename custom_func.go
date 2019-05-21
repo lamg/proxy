@@ -1,3 +1,23 @@
+// Copyright © 2018-2019 Luis Ángel Méndez Gort
+
+// This file is part of Proxy.
+
+// Proxy is free software: you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General
+// Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your
+// option) any later version.
+
+// Proxy is distributed in the hope that it will be
+// useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A
+// PARTICULAR PURPOSE. See the GNU Lesser General Public
+// License for more details.
+
+// You should have received a copy of the GNU Lesser General
+// Public License along with Proxy.  If not, see
+// <https://www.gnu.org/licenses/>.
+
 package proxy
 
 import (
@@ -6,45 +26,59 @@ import (
 	"time"
 )
 
-// IfaceParentProxy is the signature of a function that
-// from method, url, IP and time, determines the
-// network interface and, optionally, a parent proxy for making
-// the connection
-type IfaceParentProxy func(string, string, string,
-	time.Time) (string, *url.URL, error)
+// ConnControl is the signature of a function that returns if
+// is possible carriyng on with the connection operation
+type ConnControl func(*Operation) *Result
 
-// ControlConn is the signature of a function that returns if
-// is possible carriyng on with the operation at the connection
-// with the internet host, made by the proxy. The first parameter
-// is the name of the operation, which is one stored in at the
-// constants Request, Report and Close. The second parameter
-// is the client IP address that originated the connection with
-// the remote host. The third is an amount of bytes requested
-// by the client or the amount actually read from the remote
-// host. Both amounts are sent with Request and Report constants
-// respectively. When the connection is closed the
-// Close operation is sent as parameter.
-type ControlConn func(int, string, int) error
+type Operation struct {
+	// One of Open, ReadRequest, ReadReport, Close
+	Command int
+	// IP at HTTP request that originated the connection operation
+	IP string
+	// Method of that request
+	Method string
+	// URL of that request
+	URL string
+	// time when the operation was created
+	Time time.Time
+	// Amount of bytes requested to be read or actually read
+	// sent with commands ReadRequest and ReadReport respectively
+	Amount int
+}
+
+type Result struct {
+	// Iface is the network interface for dialing the connection.
+	// This field is used only with the Open command
+	Iface string
+	// Proxy is the proxy URL for dialing the connection.
+	// This field is used only with the Open command
+	Proxy *url.URL
+	Error error
+}
 
 const (
-	Request = iota
-	Report
+	// Open command must return the proper network interface and
+	// proxy for dialing a connection. They are not used for the
+	// rest of the commands
+	Open = iota
+	// ReadRequest command is performed before calling the Read
+	// method of the underlying connection. It's sent with
+	// the amount of bytes requested to read.
+	ReadRequest
+	// ReadReport command is performed after calling the Read
+	// method of the underlynig connection. It's sent with
+	// the amount of bytes actually read
+	ReadReport
+	// Close is performed after the underlying connection is closed
 	Close
 )
 
-// DefaultIfaceProxyFromEnv is the IfaceParentProxy implementation
-// for selecting the default interface and the parent proxy
-// from environment
-func DefaultIfaceProxyFromEnv(meth, ürl, ip string,
-	t time.Time) (iface string, p *url.URL,
-	e error) {
-	p, e = h.ProxyFromEnvironment(nil)
-	return
-}
-
-// UnrestrictedConn is the ControlConn implementation for allowing
-// the dialed connection perform its default behavior
-func UnrestrictedConn(operation int, ip string,
-	amount int) (e error) {
+// DefaultConnControl is the default connection controller
+// (ConnControl) returning the proper result for dialing the
+// connections with the proxy from environment, using the default
+// network interface
+func DefaultConnControl(op *Operation) (r *Result) {
+	p, e := h.ProxyFromEnvironment(nil)
+	r = &Result{Proxy: p, Error: e}
 	return
 }

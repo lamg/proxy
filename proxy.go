@@ -26,7 +26,6 @@ import (
 	"io"
 	"net"
 	h "net/http"
-	"net/url"
 	"sync"
 	"time"
 
@@ -36,10 +35,9 @@ import (
 )
 
 type proxyS struct {
-	clock   func() time.Time
+	now     func() time.Time
 	timeout time.Duration
-	preConn IfaceParentProxy
-	ctlConn ControlConn
+	ctl     ConnControl
 	trans   *h.Transport
 	fastCl  *fh.Client
 }
@@ -48,19 +46,17 @@ type proxyS struct {
 // as an HTTP/HTTPS proxy server in conjunction with
 // a net/http.Server
 func NewProxy(
-	preConn IfaceParentProxy,
-	ctlConn ControlConn,
+	ctl ConnControl,
 	dialTimeout time.Duration,
 	maxIdleConns int,
 	idleConnTimeout,
 	tlsHandshakeTimeout,
 	expectContinueTimeout time.Duration,
-	clock func() time.Time,
+	now func() time.Time,
 ) (p h.Handler) {
 	prx := &proxyS{
-		clock:   clock,
-		preConn: preConn,
-		ctlConn: ctlConn,
+		now:     now,
+		ctl:     ctl,
 		timeout: dialTimeout,
 		trans: &h.Transport{
 			MaxIdleConns:          maxIdleConns,
@@ -75,30 +71,32 @@ func NewProxy(
 	return
 }
 
-type ifaceProxyKT string
+type reqParamsKT string
 
-const ifaceProxyK = "ifaceProxyK"
+const reqParamsK = "reqParams"
 
-type ifaceProxy struct {
-	ip    string
-	iface string
-	proxy *url.URL
-	e     error
+type reqParams struct {
+	method string
+	ip     string
+	ürl    string
 }
 
 func (p *proxyS) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
-	t := p.clock()
-	i := new(ifaceProxy)
-	i.ip, _, _ = net.SplitHostPort(r.RemoteAddr)
-	i.iface, i.proxy, i.e = p.preConn(r.Method, r.URL.String(),
-		i.ip, t)
-	c := context.WithValue(r.Context(), ifaceProxyK, i)
-	nr := r.WithContext(c)
-	if r.Method == h.MethodConnect {
-		p.handleTunneling(w, nr)
+	i := &reqParams{method: r.Method, ürl: r.URL.String()}
+	var e error
+	i.ip, _, e = net.SplitHostPort(r.RemoteAddr)
+	if e == nil {
+		c := context.WithValue(r.Context(), reqParamsK, i)
+		nr := r.WithContext(c)
+		if r.Method == h.MethodConnect {
+			p.handleTunneling(w, nr)
+		} else {
+			p.handleHTTP(w, nr)
+		}
 	} else {
-		p.handleHTTP(w, nr)
+		h.Error(w, "Malformed remote address "+r.RemoteAddr,
+			h.StatusBadRequest)
 	}
 }
 
@@ -154,14 +152,23 @@ func (p *proxyS) handleHTTP(w h.ResponseWriter,
 
 func (p *proxyS) dialContext(ctx context.Context, network,
 	addr string) (c net.Conn, e error) {
-	ifpr := ctx.Value(ifaceProxyK).(*ifaceProxy)
-	if ifpr != nil && ifpr.e == nil {
+	rqp := ctx.Value(reqParamsK).(*reqParams)
+	op := &Operation{
+		Command: Open,
+		Method:  rqp.method,
+		IP:      rqp.ip,
+		URL:     rqp.ürl,
+		Time:    p.now(),
+	}
+	r := p.ctl(op)
+	e = r.Error
+	if e == nil {
 		dlr := &net.Dialer{
 			Timeout: p.timeout,
 		}
-		if ifpr.iface != "" {
+		if r.Iface != "" {
 			var nf *net.Interface
-			nf, e = net.InterfaceByName(ifpr.iface)
+			nf, e = net.InterfaceByName(r.Iface)
 			var laddr []net.Addr
 			if e == nil {
 				laddr, e = nf.Addrs()
@@ -173,9 +180,9 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 			}
 		}
 		var n net.Conn
-		if ifpr.proxy != nil {
+		if r.Proxy != nil {
 			var d gp.Dialer
-			d, e = gp.FromURL(ifpr.proxy, dlr)
+			d, e = gp.FromURL(r.Proxy, dlr)
 			if e == nil {
 				n, e = d.Dial(network, addr)
 			}
@@ -183,33 +190,44 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 			n, e = dlr.Dial(network, addr)
 		}
 		if e == nil {
-			c = &ctlConn{Conn: n, ip: ifpr.ip, ctl: p.ctlConn}
+			c = &ctlConn{Conn: n, par: rqp, ctl: p.ctl, now: p.now}
 		}
-	} else if ifpr != nil && ifpr.e != nil {
-		e = ifpr.e
-	} else {
-		e = fmt.Errorf("No connection parameters in context")
 	}
 	return
 }
 
 type ctlConn struct {
 	net.Conn
-	ip  string
-	ctl ControlConn
+	par *reqParams
+	ctl ConnControl
+	now func() time.Time
 }
 
 func (c *ctlConn) Read(p []byte) (n int, e error) {
-	e = c.ctl(Request, c.ip, len(p))
+	e = c.operation(ReadRequest, len(p))
 	if e == nil {
 		n, e = c.Conn.Read(p)
-		e = c.ctl(Report, c.ip, n)
+		c.operation(ReadReport, n)
 	}
 	return
 }
 
 func (c *ctlConn) Close() (e error) {
-	e = c.ctl(Close, c.ip, 0)
+	e = c.Conn.Close()
+	c.operation(Close, 0)
+	return
+}
+
+func (c *ctlConn) operation(op, amount int) (e error) {
+	x := &Operation{
+		Command: op,
+		IP:      c.par.ip,
+		Method:  c.par.method,
+		URL:     c.par.ürl,
+		Time:    c.now(),
+		Amount:  amount,
+	}
+	e = c.ctl(x).Error
 	return
 }
 

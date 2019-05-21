@@ -2,7 +2,7 @@
 
 [![GoDoc][0]][1] [![Go Report Card][2]][3]
 
-HTTP/HTTPS proxy library that dials connections using the network interface and parent proxy (HTTP or SOCKS5) determined by a custom procedure, having request method, URL, remote address and time as parameters. The dialed connection is controlled by another custom procedure. It can be served using [standard library server][4] or [fasthttp server][5]
+HTTP/HTTPS proxy library that dials connections using the network interface and parent proxy (HTTP or SOCKS5) determined by a custom procedure, having request method, URL, remote address and time as parameters. The dialed connection's operation is controlled by that procedure. It can be served using [standard library server][4] or [fasthttp server][5]
 
 ## Install
 
@@ -15,8 +15,7 @@ cd proxy/cmd/proxy && go install
 
 ## Usage
 
-The library uses custom procedures for determining the network interface and parent proxy for making the connection, and for controlling the established connection's behavior. These are [IfaceParentProxy][6] and [ControlConn][7] respectively.
-
+The library uses the custom procedure, [ConnControl][6], for determining the network interface and parent proxy for making the connection, and for controlling the established connection's behavior. 
 ## Example
 
 This is a proxy that denies all the connections coming from IP addresses outside a given range.
@@ -29,7 +28,6 @@ import (
 	"fmt"
 	"net"
 	h "net/http"
-	"net/url"
 	"time"
 
 	alg "github.com/lamg/algorithms"
@@ -40,7 +38,8 @@ func main() {
 	rip, e := restrictedIPRange([]string{"127.0.0.1/32"}) // localhost clients only
 	if e == nil {
 		timeout := 30 * time.Second
-		p := proxy.NewProxy(rip, proxy.UnrestrictedConn,
+		p := proxy.NewProxy(
+			rip,
 			timeout,
 			100,
 			timeout,
@@ -61,7 +60,7 @@ func main() {
 	}
 }
 
-func restrictedIPRange(cidrs []string) (f proxy.IfaceParentProxy,
+func restrictedIPRange(cidrs []string) (f proxy.ConnControl,
 	e error) {
 	iprgs := make([]*net.IPNet, len(cidrs))
 	ib := func(i int) (b bool) {
@@ -71,17 +70,25 @@ func restrictedIPRange(cidrs []string) (f proxy.IfaceParentProxy,
 	}
 	alg.BLnSrch(ib, len(cidrs))
 	if e == nil {
-		f = func(meth, ürl, ip string, t time.Time) (iface string,
-			p *url.URL, d error) {
-			ni := net.ParseIP(ip)
-			if ni != nil {
-				ib := func(i int) bool { return iprgs[i].Contains(ni) }
-				ok, _ := alg.BLnSrch(ib, len(iprgs))
-				if !ok {
-					d = fmt.Errorf("Client IP '%s' out of range", ip)
+		f = func(op *proxy.Operation) (r *proxy.Result) {
+			r = new(proxy.Result)
+			// if proxy.Open command is sent,
+			// a *proxy.Result.Error != nil means the connection will
+			// not be established
+			if op.Command == proxy.Open {
+				ni := net.ParseIP(op.IP)
+				if ni != nil {
+					ib := func(i int) bool { return iprgs[i].Contains(ni) }
+					ok, _ := alg.BLnSrch(ib, len(iprgs))
+					if !ok {
+						r.Error = fmt.Errorf("Client IP '%s' out of range",
+							op.IP)
+					}
+				} else {
+					r.Error = fmt.Errorf("Error parsing client IP '%s'",
+						op.IP)
 				}
-			} else {
-				d = fmt.Errorf("Error parsing client IP '%s'", ip)
+
 			}
 			return
 		}
@@ -99,5 +106,4 @@ func restrictedIPRange(cidrs []string) (f proxy.IfaceParentProxy,
 [4]: https://godoc.org/net/http#Server
 [5]: https://godoc.org/github.com/valyala/fasthttp#Server
 
-[6]: https://godoc.org/github.com/lamg/proxy#IfaceParentProxy
-[7]: https://godoc.org/github.com/lamg/proxy#ControlConn
+[6]: https://godoc.org/github.com/lamg/proxy#ConnControl

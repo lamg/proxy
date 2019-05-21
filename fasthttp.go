@@ -37,16 +37,14 @@ import (
 // used as an HTTP/HTTPS proxy server, in conjunction with
 // a github.com/valyala/fasthttp.Server
 func NewFastProxy(
-	preConn IfaceParentProxy,
-	ctlConn ControlConn,
+	ctl ConnControl,
 	dialTimeout time.Duration,
-	clock func() time.Time,
+	now func() time.Time,
 ) (hn fh.RequestHandler) {
 	gp.RegisterDialerType("http", newHTTPProxy)
 	p := &proxyS{
-		preConn: preConn,
-		ctlConn: ctlConn,
-		clock:   clock,
+		ctl:     ctl,
+		now:     now,
 		timeout: dialTimeout,
 		fastCl: &fh.Client{
 			DialDualStack: true,
@@ -57,17 +55,13 @@ func NewFastProxy(
 }
 
 func (p *proxyS) fastHandler(ctx *fh.RequestCtx) {
-	t := p.clock()
-	i := new(ifaceProxy)
+	i := &reqParams{
+		method: string(ctx.Request.Header.Method()),
+		ürl:    ctx.URI().String(),
+	}
 	raddr := ctx.RemoteAddr().String()
 	i.ip, _, _ = net.SplitHostPort(raddr)
-	i.iface, i.proxy, i.e = p.preConn(
-		string(ctx.Request.Header.Method()),
-		ctx.URI().String(),
-		i.ip,
-		t,
-	)
-	nctx := context.WithValue(ctx, ifaceProxyK, i)
+	nctx := context.WithValue(ctx, reqParamsK, i)
 	p.fastCl.Dial = func(addr string) (c net.Conn, e error) {
 		c, e = p.dialContext(nctx, "tcp", addr)
 		return

@@ -18,9 +18,9 @@
 // Public License along with Proxy.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-// Proxy is an HTTP/HTTPS proxy library that uses custom
-// procedures for selecting the network interface or parent
+// Proxy is an HTTP/HTTPS proxy library that uses a custom
+// procedure for selecting the network interface or parent
 // proxy (HTTP or SOCKS5) used for dialing each connection, and
-// for controlling the dialed connection. It can be served using
+// for controlling its operation. It can be served using
 // net/http.Server or github.com/valyala/fasthttp.Server
 package proxy
