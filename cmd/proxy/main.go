@@ -69,20 +69,7 @@ func main() {
 			np := proxy.NewFastProxy(rip, 90*time.Second, time.Now)
 			e = fh.ListenAndServe(addr, np)
 		} else {
-			maxIdleConns := 100
-			idleConnTimeout := 90 * time.Second
-			tlsHandshakeTimeout := 10 * time.Second
-			expectContinueTimeout := time.Second
-
-			np := proxy.NewProxy(
-				rip,
-				idleConnTimeout,
-				maxIdleConns,
-				idleConnTimeout,
-				tlsHandshakeTimeout,
-				expectContinueTimeout,
-				time.Now,
-			)
+			np := proxy.NewProxy(rip, 10*time.Second, time.Now)
 			e = standardSrv(np, addr)
 		}
 	}

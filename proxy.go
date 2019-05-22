@@ -48,22 +48,13 @@ type proxyS struct {
 func NewProxy(
 	ctl ConnControl,
 	dialTimeout time.Duration,
-	maxIdleConns int,
-	idleConnTimeout,
-	tlsHandshakeTimeout,
-	expectContinueTimeout time.Duration,
 	now func() time.Time,
 ) (p h.Handler) {
 	prx := &proxyS{
 		now:     now,
 		ctl:     ctl,
 		timeout: dialTimeout,
-		trans: &h.Transport{
-			MaxIdleConns:          maxIdleConns,
-			IdleConnTimeout:       idleConnTimeout,
-			TLSHandshakeTimeout:   tlsHandshakeTimeout,
-			ExpectContinueTimeout: expectContinueTimeout,
-		},
+		trans:   new(h.Transport),
 	}
 	prx.trans.DialContext = prx.dialContext
 	gp.RegisterDialerType("http", newHTTPProxy)

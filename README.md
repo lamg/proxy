@@ -39,15 +39,7 @@ func main() {
 	rip, e := restrictedIPRange([]string{"127.0.0.1/32"}) // localhost clients only
 	if e == nil {
 		timeout := 30 * time.Second
-		p := proxy.NewProxy(
-			rip,
-			timeout,
-			100,
-			timeout,
-			timeout,
-			timeout,
-			time.Now,
-		)
+		p := proxy.NewProxy(rip, 10*time.Second, time.Now)
 		server := &h.Server{
 			Addr:         ":8080",
 			Handler:      p,
