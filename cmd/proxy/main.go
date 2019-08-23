@@ -45,7 +45,7 @@ func main() {
 	flag.StringVar(&addr, "a", ":8080", "Server address")
 	flag.StringVar(&lrange, "r", "127.0.0.1/32",
 		"CIDR range for listening")
-	flag.StringVar(&proxyURL, "p", "", "Proxy address")
+	flag.StringVar(&proxyURL, "p", "", "Parent proxy address")
 	flag.BoolVar(&fastH, "f", false,
 		"Use github.com/valyala/fasthttp")
 	flag.Parse()
