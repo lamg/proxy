@@ -178,6 +178,7 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 				n, e = d.Dial(network, addr)
 			}
 		} else {
+			println("dial:", network, addr)
 			n, e = dlr.Dial(network, addr)
 		}
 		if e == nil {
