@@ -172,14 +172,12 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 		}
 		var n net.Conn
 		if r.Proxy != nil {
-			println("parent proxy:", r.Proxy.String())
 			var d gp.Dialer
 			d, e = gp.FromURL(r.Proxy, dlr)
 			if e == nil {
 				n, e = d.Dial(network, addr)
 			}
 		} else {
-			println("dial:", network, addr)
 			n, e = dlr.Dial(network, addr)
 		}
 		if e == nil {

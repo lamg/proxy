@@ -59,7 +59,6 @@ func (p *proxyS) fastHandler(ctx *fh.RequestCtx) {
 		method: string(ctx.Request.Header.Method()),
 		ürl:    string(ctx.Host()),
 	}
-	println(i.method, i.ürl)
 	raddr := ctx.RemoteAddr().String()
 	i.ip, _, _ = net.SplitHostPort(raddr)
 	nctx := context.WithValue(ctx, reqParamsK, i)
