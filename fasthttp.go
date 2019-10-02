@@ -57,7 +57,7 @@ func NewFastProxy(
 func (p *proxyS) fastHandler(ctx *fh.RequestCtx) {
 	i := &reqParams{
 		method: string(ctx.Request.Header.Method()),
-		ürl:    ctx.URI().String(),
+		ürl:    string(ctx.Host()),
 	}
 	println(i.method, i.ürl)
 	raddr := ctx.RemoteAddr().String()
