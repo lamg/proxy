@@ -34,12 +34,13 @@ import (
 	gp "golang.org/x/net/proxy"
 )
 
-type proxyS struct {
+type Proxy struct {
 	now     func() time.Time
 	timeout time.Duration
 	ctl     ConnControl
 	trans   *h.Transport
 	fastCl  *fh.Client
+	Log     func(string)
 }
 
 // NewProxy creates a net/http.Handler ready to be used
@@ -49,8 +50,8 @@ func NewProxy(
 	ctl ConnControl,
 	dialTimeout time.Duration,
 	now func() time.Time,
-) (p h.Handler) {
-	prx := &proxyS{
+) (p *Proxy) {
+	prx := &Proxy{
 		now:     now,
 		ctl:     ctl,
 		timeout: dialTimeout,
@@ -72,7 +73,7 @@ type reqParams struct {
 	ürl    string
 }
 
-func (p *proxyS) ServeHTTP(w h.ResponseWriter,
+func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
 	i := &reqParams{method: r.Method, ürl: r.URL.String()}
 	var e error
@@ -95,7 +96,7 @@ var (
 	clientConnectOK = []byte("HTTP/1.0 200 OK\r\n\r\n")
 )
 
-func (p *proxyS) handleTunneling(w h.ResponseWriter,
+func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	r *h.Request) {
 	destConn, e := p.dialContext(r.Context(), "tcp", r.Host)
 
@@ -128,7 +129,7 @@ func (p *proxyS) handleTunneling(w h.ResponseWriter,
 	}
 }
 
-func (p *proxyS) handleHTTP(w h.ResponseWriter,
+func (p *Proxy) handleHTTP(w h.ResponseWriter,
 	req *h.Request) {
 	resp, e := p.trans.RoundTrip(req)
 	if e == nil {
@@ -141,7 +142,7 @@ func (p *proxyS) handleHTTP(w h.ResponseWriter,
 	}
 }
 
-func (p *proxyS) dialContext(ctx context.Context, network,
+func (p *Proxy) dialContext(ctx context.Context, network,
 	addr string) (c net.Conn, e error) {
 	rqp := ctx.Value(reqParamsK).(*reqParams)
 	op := &Operation{
@@ -153,6 +154,7 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 	}
 	r := p.ctl(op)
 	e = r.Error
+	var n net.Conn
 	if e == nil {
 		dlr := &net.Dialer{
 			Timeout: p.timeout,
@@ -170,21 +172,32 @@ func (p *proxyS) dialContext(ctx context.Context, network,
 				e = fmt.Errorf("No local IP")
 			}
 		}
-		var n net.Conn
 		if r.Proxy != nil {
+			p.log("parent proxy: " + r.Proxy.String())
 			var d gp.Dialer
 			d, e = gp.FromURL(r.Proxy, dlr)
 			if e == nil {
 				n, e = d.Dial(network, addr)
 			}
 		} else {
+			p.log("dial:" + network + " " + addr)
 			n, e = dlr.Dial(network, addr)
 		}
-		if e == nil {
-			c = &ctlConn{Conn: n, par: rqp, ctl: p.ctl, now: p.now}
-		}
+	}
+	if e == nil {
+		nc := &ctlConn{Conn: n, par: rqp, ctl: p.ctl, now: p.now}
+		nc.log = p.Log
+		c = nc
+	} else {
+		p.log("error: " + e.Error())
 	}
 	return
+}
+
+func (p *Proxy) log(s string) {
+	if p.Log != nil {
+		p.Log(s)
+	}
 }
 
 type ctlConn struct {
@@ -192,6 +205,7 @@ type ctlConn struct {
 	par *reqParams
 	ctl ConnControl
 	now func() time.Time
+	log func(string)
 }
 
 func (c *ctlConn) Read(p []byte) (n int, e error) {
@@ -219,6 +233,12 @@ func (c *ctlConn) operation(op, amount int) (e error) {
 		Amount:  amount,
 	}
 	e = c.ctl(x).Error
+	if c.log != nil {
+		c.log(fmt.Sprintf(
+			"Op: %d Remote: %s URL: %s Amount: %d Error:%v",
+			op, c.par.ip, c.par.ürl, amount, e,
+		))
+	}
 	return
 }
 

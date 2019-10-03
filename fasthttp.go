@@ -40,9 +40,9 @@ func NewFastProxy(
 	ctl ConnControl,
 	dialTimeout time.Duration,
 	now func() time.Time,
-) (hn fh.RequestHandler) {
+) (p *Proxy) {
 	gp.RegisterDialerType("http", newHTTPProxy)
-	p := &proxyS{
+	p = &Proxy{
 		ctl:     ctl,
 		now:     now,
 		timeout: dialTimeout,
@@ -50,11 +50,10 @@ func NewFastProxy(
 			DialDualStack: true,
 		},
 	}
-	hn = p.fastHandler
 	return
 }
 
-func (p *proxyS) fastHandler(ctx *fh.RequestCtx) {
+func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
 	i := &reqParams{
 		method: string(ctx.Request.Header.Method()),
 		ürl:    string(ctx.Host()),

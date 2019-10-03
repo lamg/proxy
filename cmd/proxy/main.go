@@ -26,6 +26,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"os"
 
 	"log"
 	"net"
@@ -41,13 +42,14 @@ import (
 
 func main() {
 	var addr, lrange, proxyURL string
-	var fastH bool
+	var fastH, debug bool
 	flag.StringVar(&addr, "a", ":8080", "Server address")
 	flag.StringVar(&lrange, "r", "127.0.0.1/32",
 		"CIDR range for listening")
 	flag.StringVar(&proxyURL, "p", "", "Parent proxy address")
 	flag.BoolVar(&fastH, "f", false,
 		"Use github.com/valyala/fasthttp")
+	flag.BoolVar(&debug, "d", false, "Debug mode")
 	flag.Parse()
 
 	var e error
@@ -67,9 +69,15 @@ func main() {
 	if e == nil {
 		if fastH {
 			np := proxy.NewFastProxy(rip, 90*time.Second, time.Now)
-			e = fh.ListenAndServe(addr, np)
+			if debug {
+				np.Log = func(s string) { fmt.Fprintln(os.Stderr, s) }
+			}
+			e = fh.ListenAndServe(addr, np.RequestHandler)
 		} else {
 			np := proxy.NewProxy(rip, 10*time.Second, time.Now)
+			if debug {
+				np.Log = func(s string) { fmt.Fprintln(os.Stderr, s) }
+			}
 			e = standardSrv(np, addr)
 		}
 	}
