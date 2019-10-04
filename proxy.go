@@ -75,7 +75,7 @@ type reqParams struct {
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
-	i := &reqParams{method: r.Method, ürl: r.URL.String()}
+	i := &reqParams{method: r.Method, ürl: r.URL.Host}
 	var e error
 	i.ip, _, e = net.SplitHostPort(r.RemoteAddr)
 	if e == nil {
