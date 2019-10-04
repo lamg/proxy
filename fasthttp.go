@@ -56,7 +56,7 @@ func NewFastProxy(
 func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
 	i := &reqParams{
 		method: string(ctx.Request.Header.Method()),
-		ürl:    string(ctx.Request.Host()),
+		ürl:    string(ctx.URI().Host()),
 	}
 	raddr := ctx.RemoteAddr().String()
 	i.ip, _, _ = net.SplitHostPort(raddr)
@@ -78,7 +78,11 @@ func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
 				}
 			})
 		} else {
-			ctx.Response.SetStatusCode(h.StatusServiceUnavailable)
+			if i.ürl == "" {
+				ctx.Response.SetStatusCode(h.StatusBadRequest)
+			} else {
+				ctx.Response.SetStatusCode(h.StatusServiceUnavailable)
+			}
 		}
 	} else {
 		copyFastHd(&ctx.Response.Header, &ctx.Request.Header)
