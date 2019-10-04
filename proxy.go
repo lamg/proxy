@@ -126,6 +126,7 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter,
 
 	if e != nil {
 		h.Error(w, e.Error(), status)
+		p.log("net/http tunneling: " + e.Error())
 	}
 }
 

@@ -56,7 +56,7 @@ func NewFastProxy(
 func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
 	i := &reqParams{
 		method: string(ctx.Request.Header.Method()),
-		ürl:    string(ctx.Host()),
+		ürl:    string(ctx.Request.Host()),
 	}
 	raddr := ctx.RemoteAddr().String()
 	i.ip, _, _ = net.SplitHostPort(raddr)
@@ -66,7 +66,7 @@ func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
 		return
 	}
 	if ctx.IsConnect() {
-		dest, e := p.fastCl.Dial(string(ctx.Host()))
+		dest, e := p.fastCl.Dial(i.ürl)
 		if e == nil {
 			ctx.Hijack(func(client net.Conn) {
 				dTCP, dok := dest.(*net.TCPConn)

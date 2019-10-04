@@ -93,8 +93,8 @@ func standardSrv(hn h.Handler, addr string) (e error) {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		// Disable HTTP/2.
-		TLSNextProto: make(map[string]func(*h.Server,
-			*tls.Conn, h.Handler)),
+		TLSNextProto: make(map[string]func(*h.Server, *tls.Conn,
+			h.Handler)),
 	}
 	e = server.ListenAndServe()
 	return
