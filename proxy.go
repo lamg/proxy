@@ -104,7 +104,6 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	status := h.StatusOK
 	if e == nil {
 		var ok bool
-		w.WriteHeader(status)
 		hijacker, ok = w.(h.Hijacker)
 		if !ok {
 			e = noHijacking()
