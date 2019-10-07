@@ -92,10 +92,6 @@ func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 	}
 }
 
-var (
-	clientConnectOK = []byte("HTTP/1.0 200 OK\r\n\r\n")
-)
-
 func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	r *h.Request) {
 	destConn, e := p.dialContext(r.Context(), "tcp", r.Host)
@@ -103,6 +99,7 @@ func (p *Proxy) handleTunneling(w h.ResponseWriter,
 	var hijacker h.Hijacker
 	status := h.StatusOK
 	if e == nil {
+		w.WriteHeader(status)
 		var ok bool
 		hijacker, ok = w.(h.Hijacker)
 		if !ok {
@@ -246,7 +243,6 @@ func copyConns(dest, client net.Conn) {
 	// learning from https://github.com/elazarl/goproxy
 	// /blob/2ce16c963a8ac5bd6af851d4877e38701346983f
 	// /https.go#L103
-	client.Write(clientConnectOK)
 	clientTCP, cok := client.(*net.TCPConn)
 	destTCP, dok := dest.(*net.TCPConn)
 	if cok && dok {

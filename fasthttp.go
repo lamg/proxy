@@ -68,6 +68,7 @@ func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
 	if ctx.IsConnect() {
 		dest, e := p.fastCl.Dial(i.ürl)
 		if e == nil {
+			ctx.SetStatusCode(h.StatusOK)
 			ctx.Hijack(func(client net.Conn) {
 				dTCP, dok := dest.(*net.TCPConn)
 				cTCP, cok := client.(*net.TCPConn)
