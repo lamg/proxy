@@ -25,14 +25,50 @@ import (
 	"bytes"
 	"github.com/stretchr/testify/require"
 	"net"
-	//h "net/http"
+	h "net/http"
 	ht "net/http/httptest"
 	"testing"
 	"time"
 )
 
+func TestStdProxyConnect(t *testing.T) {
+	ctl := func(o *Operation) *Result { return new(Result) }
+	bla, blabla := "bla", "blabla"
+	client, server := newMockConn(bla), newMockConn(blabla)
+	dial := func(iface string) func(string, string) (net.Conn,
+		error) {
+		return func(network, addr string) (n net.Conn, e error) {
+			n = server
+			return
+		}
+	}
+	p := NewProxy(ctl, dial, time.Now)
+	w, r :=
+		&hijacker{
+			ResponseRecorder: ht.NewRecorder(),
+			n:                client,
+		},
+		ht.NewRequest(h.MethodConnect, ht.DefaultRemoteAddr, nil)
+	p.ServeHTTP(w, r)
+	require.Equal(t, h.StatusOK, w.Code)
+	<-client.clöse
+	<-server.clöse
+	require.Equal(t, bla, server.write.String())
+	require.Equal(t, blabla, client.write.String())
+}
+
+type hijacker struct {
+	*ht.ResponseRecorder
+	n net.Conn
+}
+
+func (j *hijacker) Hijack() (c net.Conn,
+	b *bufio.ReadWriter, e error) {
+	c = j.n
+	return
+}
+
 func TestCopyConns(t *testing.T) {
-	//ctl := func(o *Operation) *Result { return new(Result) }
 	bla, blabla := "bla", "blabla"
 	client, server := newMockConn(bla), newMockConn(blabla)
 	copyConns(server, client)
@@ -80,17 +116,5 @@ func (m *mockConn) SetReadDeadline(t time.Time) (e error) {
 }
 
 func (m *mockConn) SetWriteDeadline(t time.Time) (e error) {
-	return
-}
-
-type hijackRecorder struct {
-	*ht.ResponseRecorder
-	n net.Conn
-}
-
-func (j *hijackRecorder) Hijack() (c net.Conn,
-	b *bufio.ReadWriter, e error) {
-	println("hijack")
-	c = j.n
 	return
 }
