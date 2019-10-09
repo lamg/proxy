@@ -43,9 +43,8 @@ func NewFastProxy(
 ) (p *Proxy) {
 	gp.RegisterDialerType("http", newHTTPProxy)
 	p = &Proxy{
-		ctl:     ctl,
-		now:     now,
-		timeout: dialTimeout,
+		ctl: ctl,
+		now: now,
 		fastCl: &fh.Client{
 			DialDualStack: true,
 		},

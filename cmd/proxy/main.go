@@ -67,14 +67,15 @@ func main() {
 		rip, e = restrIPRange(cidrs, u)
 	}
 	if e == nil {
+		nd := &proxy.NetworkDialer{90 * time.Second}
 		if fastH {
-			np := proxy.NewFastProxy(rip, 90*time.Second, time.Now)
+			np := proxy.NewFastProxy(rip, nd.Dial, time.Now)
 			if debug {
 				np.Log = func(s string) { fmt.Fprintln(os.Stderr, s) }
 			}
 			e = fh.ListenAndServe(addr, np.RequestHandler)
 		} else {
-			np := proxy.NewProxy(rip, 10*time.Second, time.Now)
+			np := proxy.NewProxy(rip, nd.Dial, time.Now)
 			if debug {
 				np.Log = func(s string) { fmt.Fprintln(os.Stderr, s) }
 			}
