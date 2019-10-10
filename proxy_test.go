@@ -33,7 +33,44 @@ import (
 )
 
 func TestFastProxyRoundTrip(t *testing.T) {
-	t.Fail()
+	bla, blabla := "bla", "blabla"
+	resp := fh.AcquireResponse()
+	resp.SetStatusCode(h.StatusOK)
+	resp.SetBodyString(blabla)
+	buff := new(bytes.Buffer)
+	resp.WriteTo(buff)
+	server := newMockConn(buff.String())
+	dial := func(iface string) func(string,
+		string) (net.Conn, error) {
+		return func(network, addr string) (n net.Conn, e error) {
+			n = server
+			return
+		}
+	}
+	req := fh.AcquireRequest()
+	req.SetHost(ht.DefaultRemoteAddr)
+	req.Header.SetMethod(h.MethodPost)
+	req.SetBodyString(bla)
+	buff0 := new(bytes.Buffer)
+	req.WriteTo(buff0)
+	client := newMockConn(buff0.String())
+
+	ctl := func(o *Operation) *Result { return new(Result) }
+	p := NewFastProxy(ctl, dial, time.Now)
+	srv := &fh.Server{
+		Handler: p.RequestHandler,
+	}
+	go func() {
+		e := srv.ServeConn(client)
+		require.NoError(t, e)
+	}()
+	<-client.clöse
+	resp0 := fh.AcquireResponse()
+	resp0.Read(bufio.NewReader(client.write))
+	require.Equal(t, blabla, string(resp0.Body()))
+	req0 := fh.AcquireRequest()
+	req0.Read(bufio.NewReader(server.write))
+	require.Equal(t, bla, string(req0.Body()))
 }
 
 func TestFastProxyConnect(t *testing.T) {
@@ -59,6 +96,8 @@ func TestFastProxyConnect(t *testing.T) {
 	require.NoError(t, e)
 	s := buff.String()
 	client := newMockConn(s + bla)
+	// client connection has the content of a valid request followed
+	// by raw data
 	e0 := srv.ServeConn(client)
 	require.NoError(t, e0)
 	<-server.clöse
@@ -145,6 +184,7 @@ func TestCopyConns(t *testing.T) {
 }
 
 type mockConn struct {
+	name  string
 	read  *bytes.Buffer
 	write *bytes.Buffer
 	clöse chan bool
