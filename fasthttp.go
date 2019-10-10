@@ -38,13 +38,14 @@ import (
 // a github.com/valyala/fasthttp.Server
 func NewFastProxy(
 	ctl ConnControl,
-	dialTimeout time.Duration,
+	dialer func(string) func(string, string) (net.Conn, error),
 	now func() time.Time,
 ) (p *Proxy) {
 	gp.RegisterDialerType("http", newHTTPProxy)
 	p = &Proxy{
-		ctl: ctl,
-		now: now,
+		ctl:      ctl,
+		now:      now,
+		dialFunc: dialer,
 		fastCl: &fh.Client{
 			DialDualStack: true,
 		},

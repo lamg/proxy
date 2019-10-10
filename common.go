@@ -146,7 +146,7 @@ func (p *Proxy) dialContext(ctx context.Context, network,
 	e = r.Error
 	var n net.Conn
 	if e == nil {
-		dlr := p.DialFunc(r.Iface)
+		dlr := p.dialFunc(r.Iface)
 		if r.Proxy != nil {
 			var d gp.Dialer
 			d, e = gp.FromURL(r.Proxy, &dialer{dlr})

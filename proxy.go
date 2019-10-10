@@ -36,7 +36,7 @@ type Proxy struct {
 	ctl      ConnControl
 	trans    *h.Transport
 	fastCl   *fh.Client
-	DialFunc func(string) func(string, string) (net.Conn, error)
+	dialFunc func(string) func(string, string) (net.Conn, error)
 }
 
 // NewProxy creates a net/http.Handler ready to be used
@@ -44,13 +44,13 @@ type Proxy struct {
 // a net/http.Server
 func NewProxy(
 	ctl ConnControl,
-	dial func(string) func(string, string) (net.Conn, error),
+	dialer func(string) func(string, string) (net.Conn, error),
 	now func() time.Time,
 ) (p *Proxy) {
 	prx := &Proxy{
 		now:      now,
 		ctl:      ctl,
-		DialFunc: dial,
+		dialFunc: dialer,
 		trans:    new(h.Transport),
 	}
 	prx.trans.DialContext = prx.dialContext
