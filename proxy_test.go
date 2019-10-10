@@ -31,6 +31,38 @@ import (
 	"time"
 )
 
+func TestFastProxyRoundTrip(t *testing.T) {
+	t.Fail()
+}
+
+func TestFastProxyConnect(t *testing.T) {
+	t.Fail()
+}
+
+func TestStdProxyRoundTrip(t *testing.T) {
+	ctl := func(o *Operation) *Result { return new(Result) }
+	bla := "bla"
+	rec := ht.NewRecorder()
+	rec.Body.WriteString(bla)
+	resp, buff := rec.Result(), new(bytes.Buffer)
+	resp.Write(buff)
+	server := newMockConn(buff.String())
+	dial := func(iface string) func(string, string) (net.Conn,
+		error) {
+		return func(network, addr string) (n net.Conn, e error) {
+			n = server
+			return
+		}
+	}
+	p := NewProxy(ctl, dial, time.Now)
+	w, r :=
+		ht.NewRecorder(),
+		ht.NewRequest(h.MethodGet, "http://example.com", nil)
+	go func() { p.ServeHTTP(w, r) }()
+	<-server.clöse
+	require.Equal(t, bla, w.Body.String())
+}
+
 func TestStdProxyConnect(t *testing.T) {
 	ctl := func(o *Operation) *Result { return new(Result) }
 	bla, blabla := "bla", "blabla"
