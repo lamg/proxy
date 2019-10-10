@@ -24,6 +24,7 @@ import (
 	"bufio"
 	"bytes"
 	"github.com/stretchr/testify/require"
+	fh "github.com/valyala/fasthttp"
 	"net"
 	h "net/http"
 	ht "net/http/httptest"
@@ -36,7 +37,40 @@ func TestFastProxyRoundTrip(t *testing.T) {
 }
 
 func TestFastProxyConnect(t *testing.T) {
-	t.Fail()
+	bla, blabla := "bla", "blabla"
+	server := newMockConn(blabla)
+	dial := func(iface string) func(string, string) (net.Conn,
+		error) {
+		return func(network, addr string) (n net.Conn, e error) {
+			n = server
+			return
+		}
+	}
+	ctl := func(o *Operation) *Result { return new(Result) }
+	p := NewFastProxy(ctl, dial, time.Now)
+	srv := &fh.Server{
+		Handler: p.RequestHandler,
+	}
+	r := fh.AcquireRequest()
+	r.Header.SetMethod(h.MethodConnect)
+	r.SetHost(ht.DefaultRemoteAddr)
+	buff := new(bytes.Buffer)
+	_, e := r.WriteTo(buff)
+	require.NoError(t, e)
+	s := buff.String()
+	client := newMockConn(s + bla)
+	e0 := srv.ServeConn(client)
+	require.NoError(t, e0)
+	<-server.clöse
+	<-client.clöse
+	require.Equal(t, bla, server.write.String())
+	// only connection's raw data reached the server
+	for i := 0; i != 5; i++ {
+		client.write.ReadString('\n')
+	}
+	// skiped HTTP response, now just the raw connection data
+	// is in the buffer
+	require.Equal(t, blabla, client.write.String())
 }
 
 func TestStdProxyRoundTrip(t *testing.T) {
