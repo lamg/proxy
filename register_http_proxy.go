@@ -95,7 +95,7 @@ func (s *httpProxy) Dial(network,
 		return nil, err
 	}
 	resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		c.Close()
 		err = fmt.Errorf("Connect server using proxy error,"+
 			"StatusCode [%d]", resp.StatusCode)
