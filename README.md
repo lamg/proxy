@@ -1,6 +1,6 @@
 # Proxy
 
-[![GoDoc][0]][1] [![Go Report Card][2]][3] [![Build Status][7]][8]
+[![GoDoc][0]][1] [![Go Report Card][2]][3] [![Build Status][7]][8] [![Coverage Status][9]][10]
 
 HTTP/HTTPS proxy library that dials connections using the network interface and parent proxy (HTTP or SOCKS5) determined by a custom procedure, having request method, URL, remote address and time as parameters. The dialed connection's operation is controlled by that procedure. It can be served using [standard library server][4] or [fasthttp server][5]
 
@@ -108,3 +108,6 @@ func restrictedIPRange(cidrs []string) (f proxy.ConnControl,
 
 [7]: https://travis-ci.com/lamg/proxy.svg?branch=master
 [8]: https://travis-ci.com/lamg/proxy
+
+[9]: https://coveralls.io/repos/github/lamg/proxy/badge.svg?branch=master
+[10]: https://coveralls.io/github/lamg/proxy?branch=master
