@@ -23,14 +23,15 @@ package proxy
 import (
 	"context"
 	"fmt"
-	alg "github.com/lamg/algorithms"
-	gp "golang.org/x/net/proxy"
 	"io"
 	"net"
 	h "net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	alg "github.com/lamg/algorithms"
+	gp "golang.org/x/net/proxy"
 )
 
 // ConnControl is the signature of a function that returns if
@@ -95,10 +96,13 @@ func DefaultConnControl(op *Operation) (r *Result) {
 	return
 }
 
+// NetworkDialer has a Dialer method designed for creating
+// a Proxy instance that uses the OS network interface
 type NetworkDialer struct {
 	Timeout time.Duration
 }
 
+// Dialer dials connections using the OS network interface
 func (p *NetworkDialer) Dialer(iface string) func(string,
 	string) (net.Conn, error) {
 	return func(network, addr string) (n net.Conn, e error) {
@@ -123,6 +127,8 @@ func (p *NetworkDialer) Dialer(iface string) func(string,
 	}
 }
 
+// NoLocalIPErr implements error and is returned when there
+// is no local IP associated to a network interface name
 type NoLocalIPErr struct {
 	Iface string
 }
