@@ -23,13 +23,11 @@ package proxy
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"github.com/stretchr/testify/require"
 	fh "github.com/valyala/fasthttp"
 	"net"
 	h "net/http"
 	ht "net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 )
@@ -41,7 +39,7 @@ func TestFastProxyRoundTrip(t *testing.T) {
 	resp.SetBodyString(blabla)
 	buff := new(bytes.Buffer)
 	resp.WriteTo(buff)
-	server := newMockConn(buff.String())
+	server := newMockConn(buff.String(), false)
 	dial := func(iface string) func(string,
 		string) (net.Conn, error) {
 		return func(network, addr string) (n net.Conn, e error) {
@@ -55,7 +53,7 @@ func TestFastProxyRoundTrip(t *testing.T) {
 	req.SetBodyString(bla)
 	buff0 := new(bytes.Buffer)
 	req.WriteTo(buff0)
-	client := newMockConn(buff0.String())
+	client := newMockConn(buff0.String(), false)
 
 	ctl := func(o *Operation) *Result { return new(Result) }
 	p := NewFastProxy(ctl, dial, time.Now)
@@ -77,7 +75,7 @@ func TestFastProxyRoundTrip(t *testing.T) {
 
 func TestFastProxyConnect(t *testing.T) {
 	bla, blabla := "bla", "blabla"
-	server := newMockConn(blabla)
+	server := newMockConn(blabla, false)
 	dial := func(iface string) func(string, string) (net.Conn,
 		error) {
 		return func(network, addr string) (n net.Conn, e error) {
@@ -97,7 +95,7 @@ func TestFastProxyConnect(t *testing.T) {
 	_, e := r.WriteTo(buff)
 	require.NoError(t, e)
 	s := buff.String()
-	client := newMockConn(s + bla)
+	client := newMockConn(s+bla, false)
 	// client connection has the content of a valid request followed
 	// by raw data
 	e0 := srv.ServeConn(client)
@@ -124,7 +122,7 @@ func TestStdProxyRoundTrip(t *testing.T) {
 	r := ht.NewRequest(h.MethodGet, "http://example.com", nil)
 	resp.Request = r
 	s := buff.String()
-	server := newMockConn(s)
+	server := newMockConn(s, true)
 	dial := func(iface string) func(string, string) (net.Conn,
 		error) {
 		return func(network, addr string) (n net.Conn, e error) {
@@ -141,7 +139,9 @@ func TestStdProxyRoundTrip(t *testing.T) {
 func TestStdProxyConnect(t *testing.T) {
 	ctl := func(o *Operation) *Result { return new(Result) }
 	bla, blabla := "bla", "blabla"
-	client, server := newMockConn(bla), newMockConn(blabla)
+	client, server :=
+		newMockConn(bla, false),
+		newMockConn(blabla, false)
 	dial := func(iface string) func(string, string) (net.Conn,
 		error) {
 		return func(network, addr string) (n net.Conn, e error) {
@@ -177,7 +177,9 @@ func (j *hijacker) Hijack() (c net.Conn,
 
 func TestCopyConns(t *testing.T) {
 	bla, blabla := "bla", "blabla"
-	client, server := newMockConn(bla), newMockConn(blabla)
+	client, server :=
+		newMockConn(bla, false),
+		newMockConn(blabla, false)
 	copyConns(server, client)
 	<-client.clöse
 	<-server.clöse
@@ -186,53 +188,44 @@ func TestCopyConns(t *testing.T) {
 }
 
 type mockConn struct {
-	name      string
-	read      *bytes.Buffer
-	write     *bytes.Buffer
-	clöse     chan bool
-	closed    bool
-	closedAcc *sync.Mutex
+	name       string
+	read       *bytes.Buffer
+	write      *bytes.Buffer
+	clöse      chan bool
+	closed     bool
+	writeFirst bool
+	writeOk    chan bool
 }
 
-func newMockConn(content string) (m *mockConn) {
+func newMockConn(content string, writeFirst bool) (m *mockConn) {
 	m = &mockConn{
-		read:      bytes.NewBufferString(content),
-		write:     new(bytes.Buffer),
-		clöse:     make(chan bool, 1),
-		closedAcc: new(sync.Mutex),
+		read:       bytes.NewBufferString(content),
+		write:      new(bytes.Buffer),
+		clöse:      make(chan bool, 1),
+		writeOk:    make(chan bool, 1),
+		writeFirst: writeFirst,
 	}
 	return
 }
 
 func (m *mockConn) Read(p []byte) (n int, e error) {
-	m.closedAcc.Lock()
-	closed := m.closed
-	m.closedAcc.Unlock()
-	if closed {
-		e = fmt.Errorf("closed")
-	} else {
-		n, e = m.read.Read(p)
+	if m.writeFirst && m.read.Len() != 0 {
+		<-m.writeOk
 	}
+	n, e = m.read.Read(p)
 	return
 }
 
 func (m *mockConn) Write(p []byte) (n int, e error) {
-	m.closedAcc.Lock()
-	closed := m.closed
-	m.closedAcc.Unlock()
-	if closed {
-		e = fmt.Errorf("closed")
-	} else {
-		n, e = m.write.Write(p)
+	n, e = m.write.Write(p)
+	if m.writeFirst {
+		m.writeOk <- true
 	}
 	return
 }
 
 func (m *mockConn) Close() (e error) {
-	m.closedAcc.Lock()
-	m.closed = true
-	m.closedAcc.Unlock()
-	m.clöse <- m.closed
+	m.clöse <- true
 	return
 }
 
