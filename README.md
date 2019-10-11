@@ -6,7 +6,7 @@ HTTP/HTTPS proxy library that dials connections using the network interface and 
 
 ## Install
 
-With Go 1.11 or superior:
+With Go 1.13 or superior:
 
 ```sh
 git clone git@github.com:lamg/proxy.git
