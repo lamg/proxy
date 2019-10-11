@@ -61,7 +61,7 @@ func NewProxy(
 
 type reqParamsKT string
 
-const reqParamsK = "reqParams"
+const reqParamsK = reqParamsKT("reqParams")
 
 type reqParams struct {
 	method string
