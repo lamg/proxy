@@ -99,7 +99,7 @@ func (r *allowedRanges) DialContext(ctx context.Context, network,
 [4]: https://travis-ci.com/lamg/proxy.svg?branch=master
 [5]: https://travis-ci.com/lamg/proxy
 
-[6]: https://coveralls.io/repos/github/lamg/proxy/badge.svg?branch=master
+[6]: https://coveralls.io/repos/github/lamg/proxy/badge.svg?branch=master&service=github
 [7]: https://coveralls.io/github/lamg/proxy?branch=master
 
 [8]: https://godoc.org/net/http#Server
