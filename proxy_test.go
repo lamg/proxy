@@ -24,8 +24,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"github.com/stretchr/testify/require"
 	fh "github.com/valyala/fasthttp"
+	"io/ioutil"
 	"net"
 	h "net/http"
 	ht "net/http/httptest"
@@ -231,4 +233,44 @@ func (m *mockConn) SetReadDeadline(t time.Time) (e error) {
 
 func (m *mockConn) SetWriteDeadline(t time.Time) (e error) {
 	return
+}
+
+func TestIfaceDialer(t *testing.T) {
+	addr, bla := "127.0.0.1:8000", "bla"
+	l, e := net.Listen(tcp, addr)
+	go func(lst net.Listener) {
+		for {
+			c, e := lst.Accept()
+			if e == nil {
+				c.Write([]byte(bla))
+				c.Close()
+			}
+		}
+	}(l)
+	iface, e0 := net.InterfaceByIndex(1)
+	var ifaceName string
+	if e0 == nil {
+		ifaceName = iface.Name
+	}
+	ifd := &IfaceDialer{
+		Timeout:   90 * time.Second,
+		Interface: ifaceName,
+	}
+	if e == nil {
+		n, e := ifd.Dial(tcp, addr)
+		if e == nil {
+			bs, e := ioutil.ReadAll(n)
+			require.NoError(t, e)
+			require.Equal(t, bla, string(bs))
+		}
+	}
+	if e != nil {
+		t.Log(e)
+	}
+	ifd.Interface = " pipo pérez "
+	_, e = ifd.Dial(tcp, addr)
+	var ne *NoLocalIPErr
+	ok := errors.As(e, &ne)
+	require.True(t, ok)
+	require.Equal(t, ifd.Interface, ne.Interface)
 }

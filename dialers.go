@@ -29,6 +29,8 @@ import (
 	gp "golang.org/x/net/proxy"
 )
 
+const tcp = "tcp"
+
 // IfaceDialer dials connections using the supplied network
 // interface and timeout. It implements the
 // golang.org/x/proxy.Dialer interface, and that allows to use it
@@ -44,16 +46,18 @@ func (d *IfaceDialer) Dial(network, addr string) (n net.Conn,
 	dlr := &net.Dialer{
 		Timeout: d.Timeout,
 	}
-	var nf *net.Interface
-	nf, e = net.InterfaceByName(d.Interface)
-	var laddr []net.Addr
-	if e == nil {
-		laddr, e = nf.Addrs()
-	}
-	if len(laddr) != 0 {
-		dlr.LocalAddr = &net.TCPAddr{IP: laddr[0].(*net.IPNet).IP}
-	} else {
-		e = &NoLocalIPErr{Interface: d.Interface}
+	if d.Interface != "" {
+		var nf *net.Interface
+		nf, e = net.InterfaceByName(d.Interface)
+		var laddr []net.Addr
+		if e == nil {
+			laddr, e = nf.Addrs()
+		}
+		if len(laddr) != 0 {
+			dlr.LocalAddr = &net.TCPAddr{IP: laddr[0].(*net.IPNet).IP}
+		} else {
+			e = &NoLocalIPErr{Interface: d.Interface}
+		}
 	}
 	if e == nil {
 		n, e = dlr.Dial(network, addr)

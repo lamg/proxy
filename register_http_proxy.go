@@ -56,7 +56,7 @@ func newHTTPProxy(uri *url.URL,
 func (s *httpProxy) Dial(network,
 	addr string) (net.Conn, error) {
 	// Dial and create the https client connection.
-	c, err := s.forward.Dial("tcp", s.host)
+	c, err := s.forward.Dial(tcp, s.host)
 	if err != nil {
 		return nil, err
 	}
