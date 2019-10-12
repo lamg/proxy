@@ -25,57 +25,53 @@ import (
 	"io"
 	"net"
 	h "net/http"
-	"time"
+	"sync"
 
 	fh "github.com/valyala/fasthttp"
 	gp "golang.org/x/net/proxy"
 )
 
 type Proxy struct {
-	now      func() time.Time
-	ctl      ConnControl
-	trans    *h.Transport
-	fastCl   *fh.Client
-	dialFunc func(string) func(string, string) (net.Conn, error)
+	trans       *h.Transport
+	fastCl      *fh.Client
+	dialContext func(context.Context, string, string) (net.Conn, error)
 }
 
 // NewProxy creates a net/http.Handler ready to be used
 // as an HTTP/HTTPS proxy server in conjunction with
 // a net/http.Server
 func NewProxy(
-	ctl ConnControl,
-	dialer func(string) func(string, string) (net.Conn, error),
-	now func() time.Time,
+	dial func(context.Context, string, string) (net.Conn, error),
 ) (p *Proxy) {
-	prx := &Proxy{
-		now:      now,
-		ctl:      ctl,
-		dialFunc: dialer,
-		trans:    new(h.Transport),
+	p = &Proxy{
+		dialContext: dial,
+		trans:       new(h.Transport),
 	}
-	prx.trans.DialContext = prx.dialContext
+	p.trans.DialContext = p.dialContext
 	gp.RegisterDialerType("http", newHTTPProxy)
-	p = prx
 	return
 }
 
-type reqParamsKT string
+// ReqParamsKT is the type of ReqParamsK
+type ReqParamsKT string
 
-const reqParamsK = reqParamsKT("reqParams")
+// ReqParamsK is the key sent in the context to the dialer,
+// associated to a *ReqParams value
+const ReqParamsK = ReqParamsKT("reqParams")
 
-type reqParams struct {
-	method string
-	ip     string
-	ürl    string
+type ReqParams struct {
+	Method string
+	IP     string
+	URL    string
 }
 
 func (p *Proxy) ServeHTTP(w h.ResponseWriter,
 	r *h.Request) {
-	i := &reqParams{method: r.Method, ürl: r.URL.Host}
+	i := &ReqParams{Method: r.Method, URL: r.URL.Host}
 	var e error
-	i.ip, _, e = net.SplitHostPort(r.RemoteAddr)
+	i.IP, _, e = net.SplitHostPort(r.RemoteAddr)
 	if e == nil {
-		c := context.WithValue(r.Context(), reqParamsK, i)
+		c := context.WithValue(r.Context(), ReqParamsK, i)
 		nr := r.WithContext(c)
 		if r.Method == h.MethodConnect {
 			p.handleTunneling(w, nr)
@@ -130,5 +126,44 @@ func (p *Proxy) handleHTTP(w h.ResponseWriter,
 		resp.Body.Close()
 	} else {
 		h.Error(w, e.Error(), h.StatusServiceUnavailable)
+	}
+}
+
+func transfer(dest io.WriteCloser, src io.ReadCloser) {
+	io.Copy(dest, src)
+	dest.Close()
+	src.Close()
+}
+
+func copyHeader(dst, src h.Header) {
+	for k, vv := range src {
+		ok := searchHopByHop(k)
+		if !ok {
+			for _, v := range vv {
+				dst.Add(k, v)
+			}
+		}
+	}
+}
+
+func copyConns(dest, client net.Conn) {
+	// learning from https://github.com/elazarl/goproxy
+	// /blob/2ce16c963a8ac5bd6af851d4877e38701346983f
+	// /https.go#L103
+	clientTCP, cok := client.(*net.TCPConn)
+	destTCP, dok := dest.(*net.TCPConn)
+	if cok && dok {
+		go transfer(destTCP, clientTCP)
+		go transfer(clientTCP, destTCP)
+	} else {
+		go func() {
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go transferWg(&wg, dest, client)
+			go transferWg(&wg, client, dest)
+			wg.Wait()
+			client.Close()
+			dest.Close()
+		}()
 	}
 }

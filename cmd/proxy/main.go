@@ -23,6 +23,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -51,27 +52,22 @@ func main() {
 	flag.Parse()
 
 	var e error
-	var u *url.URL
+	var parentProxy *url.URL
 	if proxyURL != "" {
-		u, e = url.Parse(proxyURL)
-		if !(u.Scheme == "http" || u.Scheme == "socks5") {
+		parentProxy, e = url.Parse(proxyURL)
+		if !(parentProxy.Scheme == "http" ||
+			parentProxy.Scheme == "socks5") {
 			e = fmt.Errorf("Not recognized URL scheme '%s', "+
-				"must be 'http' or 'socks5'", u.Scheme)
+				"must be 'http' or 'socks5'", parentProxy.Scheme)
 		}
 	}
-	var rip proxy.ConnControl
+	ar, e := newAllowedRanges(parentProxy, lrange)
 	if e == nil {
-		cidrs := []string{lrange}
-		rip, e = restrIPRange(cidrs, u)
-	}
-	if e == nil {
-		nd := &proxy.NetworkDialer{Timeout: 90 * time.Second}
 		if fastH {
-			np := proxy.NewFastProxy(rip, nd.Dialer, time.Now)
-
+			np := proxy.NewFastProxy(ar.DialContext)
 			e = fh.ListenAndServe(addr, np.RequestHandler)
 		} else {
-			np := proxy.NewProxy(rip, nd.Dialer, time.Now)
+			np := proxy.NewProxy(ar.DialContext)
 			e = standardSrv(np, addr)
 		}
 	}
@@ -94,31 +90,45 @@ func standardSrv(hn h.Handler, addr string) (e error) {
 	return
 }
 
-func restrIPRange(cidrs []string,
-	prx *url.URL) (f proxy.ConnControl,
-	e error) {
-	iprgs := make([]*net.IPNet, len(cidrs))
+type allowedRanges struct {
+	ranges      []*net.IPNet
+	parentProxy *url.URL
+	timeout     time.Duration
+}
+
+func newAllowedRanges(parentProxy *url.URL,
+	cidrs ...string) (a *allowedRanges, e error) {
+	a = &allowedRanges{
+		ranges:      make([]*net.IPNet, len(cidrs)),
+		parentProxy: parentProxy,
+		timeout:     90 * time.Second,
+	}
 	ib := func(i int) (b bool) {
-		_, iprgs[i], e = net.ParseCIDR(cidrs[i])
+		_, a.ranges[i], e = net.ParseCIDR(cidrs[i])
 		b = e != nil
 		return
 	}
 	alg.BLnSrch(ib, len(cidrs))
+	return
+}
+
+func (r *allowedRanges) DialContext(ctx context.Context, network,
+	addr string) (c net.Conn, e error) {
+	rqp := ctx.Value(proxy.ReqParamsK).(*proxy.ReqParams)
+	ip := net.ParseIP(rqp.IP)
+	ok, _ := alg.BLnSrch(
+		func(i int) bool { return r.ranges[i].Contains(ip) },
+		len(r.ranges),
+	)
+	if !ok {
+		e = fmt.Errorf("Client IP '%s' out of range", rqp.IP)
+	}
 	if e == nil {
-		f = func(op *proxy.Operation) (r *proxy.Result) {
-			r = &proxy.Result{Proxy: prx}
-			ni := net.ParseIP(op.IP)
-			if ni != nil {
-				ib := func(i int) bool { return iprgs[i].Contains(ni) }
-				ok, _ := alg.BLnSrch(ib, len(iprgs))
-				if !ok {
-					r.Error = fmt.Errorf("Client IP '%s' out of range",
-						op.IP)
-				}
-			} else {
-				r.Error = fmt.Errorf("Error parsing client IP '%s'", op.IP)
-			}
-			return
+		ifd := &proxy.IfaceDialer{Timeout: r.timeout}
+		if r.parentProxy != nil {
+			c, e = proxy.DialProxy(network, addr, r.parentProxy, ifd)
+		} else {
+			c, e = ifd.Dial(network, addr)
 		}
 	}
 	return

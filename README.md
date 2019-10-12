@@ -1,10 +1,10 @@
 # Proxy
 
-[![GoDoc][0]][1] [![Go Report Card][2]][3] [![Build Status][7]][8] [![Coverage Status][9]][10]
+[![GoDoc][0]][1] [![Go Report Card][2]][3] [![Build Status][4]][5] [![Coverage Status][6]][7]
 
-HTTP/HTTPS proxy library that dials connections using the network interface and parent proxy (HTTP or SOCKS5) determined by a custom procedure, having request method, URL, remote address and time as parameters. The dialed connection's operation is controlled by that procedure. It can be served using [standard library server][4] or [fasthttp server][5]
+HTTP/HTTPS proxy library with custom dialer, which receives in the context key `proxy.ReqParamsK` a `*proxy.ReqParams` instance with the IP that made the request, it's URL and method. It can be served using [standard library server][8] or [fasthttp server][9], and has two builtin dialers for dialing with a specific network interface or parent proxy.
 
-## Install
+## Install example server
 
 With Go 1.13 or superior:
 
@@ -13,13 +13,9 @@ git clone git@github.com:lamg/proxy.git
 cd proxy/cmd/proxy && go install
 ```
 
-## Usage
-
-The library uses the custom procedure [ConnControl][6], for determining the network interface and parent proxy for making the connection, and for controlling the established connection's behavior.
- 
 ## Example
 
-This is a proxy that denies all the connections coming from IP addresses outside a given range.
+This is a proxy that denies all the connections coming from IP addresses different from `127.0.0.1`.
 
 ```go
 package main
@@ -36,10 +32,10 @@ import (
 )
 
 func main() {
-	rip, e := restrictedIPRange([]string{"127.0.0.1/32"}) // localhost clients only
+	// localhost clients only
+  ar, e := newAllowedRanges("127.0.0.1/32")
 	if e == nil {
-		nd := proxy.NetworkDialer{Timeout: 30 * time.Second}
-		p := proxy.NewProxy(rip, nd.Dialer, time.Now)
+		p := proxy.NewProxy(ar.DialContext)
 		server := &h.Server{
 			Addr:         ":8080",
 			Handler:      p,
@@ -56,40 +52,39 @@ func main() {
 	}
 }
 
-func restrictedIPRange(cidrs []string) (f proxy.ConnControl,
-	e error) {
-	iprgs := make([]*net.IPNet, len(cidrs))
+type allowedRanges struct {
+	ranges      []*net.IPNet
+	timeout     time.Duration
+}
+
+func newAllowedRanges(cidrs ...string) (a *allowedRanges, e error) {
+	a = &allowedRanges{
+		ranges:      make([]*net.IPNet, len(cidrs)),
+		timeout:     90 * time.Second,
+	}
 	ib := func(i int) (b bool) {
-		_, iprgs[i], e = net.ParseCIDR(cidrs[i])
+		_, a.ranges[i], e = net.ParseCIDR(cidrs[i])
 		b = e != nil
 		return
 	}
 	alg.BLnSrch(ib, len(cidrs))
+	return
+}
+
+func (r *allowedRanges) DialContext(ctx context.Context, network,
+	addr string) (c net.Conn, e error) {
+	rqp := ctx.Value(proxy.ReqParamsK).(*proxy.ReqParams)
+	ip := net.ParseIP(rqp.IP)
+	ok, _ := alg.BLnSrch(
+		func(i int) bool { return r.ranges[i].Contains(ip) },
+		len(r.ranges),
+	)
+	if !ok {
+		e = fmt.Errorf("Client IP '%s' out of range", rqp.IP)
+	}
 	if e == nil {
-		f = func(op *proxy.Operation) (r *proxy.Result) {
-			r = new(proxy.Result)
-			// if proxy.Open command is sent,
-			// a *proxy.Result.Error != nil means the connection will
-			// not be established, and since the rest of the operations
-			// are performed if this is successful, there's no need to
-			// check them in this case where the connection's behavior
-			// is not controlled after it's established
-			if op.Command == proxy.Open {
-				ni := net.ParseIP(op.IP)
-				if ni != nil {
-					ib := func(i int) bool { return iprgs[i].Contains(ni) }
-					ok, _ := alg.BLnSrch(ib, len(iprgs))
-					if !ok {
-						r.Error = fmt.Errorf("Client IP '%s' out of range",
-							op.IP)
-					}
-				} else {
-					r.Error = fmt.Errorf("Error parsing client IP '%s'",
-						op.IP)
-				}
-			}
-			return
-		}
+		ifd := &proxy.IfaceDialer{Timeout: r.timeout}
+		c, e = ifd.Dial(network, addr)
 	}
 	return
 }
@@ -101,13 +96,11 @@ func restrictedIPRange(cidrs []string) (f proxy.ConnControl,
 [2]: https://goreportcard.com/badge/github.com/lamg/proxy
 [3]: https://goreportcard.com/report/github.com/lamg/proxy
 
-[4]: https://godoc.org/net/http#Server
-[5]: https://godoc.org/github.com/valyala/fasthttp#Server
+[4]: https://travis-ci.com/lamg/proxy.svg?branch=master
+[5]: https://travis-ci.com/lamg/proxy
 
-[6]: https://godoc.org/github.com/lamg/proxy#ConnControl
+[6]: https://coveralls.io/repos/github/lamg/proxy/badge.svg?branch=master
+[7]: https://coveralls.io/github/lamg/proxy?branch=master
 
-[7]: https://travis-ci.com/lamg/proxy.svg?branch=master
-[8]: https://travis-ci.com/lamg/proxy
-
-[9]: https://coveralls.io/repos/github/lamg/proxy/badge.svg?branch=master
-[10]: https://coveralls.io/github/lamg/proxy?branch=master
+[8]: https://godoc.org/net/http#Server
+[9]: https://godoc.org/github.com/valyala/fasthttp#Server

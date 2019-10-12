@@ -26,7 +26,6 @@ import (
 	"net"
 	h "net/http"
 	"sync"
-	"time"
 
 	fh "github.com/valyala/fasthttp"
 	gp "golang.org/x/net/proxy"
@@ -37,15 +36,11 @@ import (
 // used as an HTTP/HTTPS proxy server, in conjunction with
 // a github.com/valyala/fasthttp.Server
 func NewFastProxy(
-	ctl ConnControl,
-	dialer func(string) func(string, string) (net.Conn, error),
-	now func() time.Time,
+	dial func(context.Context, string, string) (net.Conn, error),
 ) (p *Proxy) {
 	gp.RegisterDialerType("http", newHTTPProxy)
 	p = &Proxy{
-		ctl:      ctl,
-		now:      now,
-		dialFunc: dialer,
+		dialContext: dial,
 		fastCl: &fh.Client{
 			DialDualStack: true,
 		},
@@ -54,19 +49,19 @@ func NewFastProxy(
 }
 
 func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
-	i := &reqParams{
-		method: string(ctx.Request.Header.Method()),
-		ürl:    string(ctx.URI().Host()),
+	i := &ReqParams{
+		Method: string(ctx.Request.Header.Method()),
+		URL:    string(ctx.URI().Host()),
 	}
 	raddr := ctx.RemoteAddr().String()
-	i.ip, _, _ = net.SplitHostPort(raddr)
-	nctx := context.WithValue(ctx, reqParamsK, i)
+	i.IP, _, _ = net.SplitHostPort(raddr)
+	nctx := context.WithValue(ctx, ReqParamsK, i)
 	p.fastCl.Dial = func(addr string) (c net.Conn, e error) {
 		c, e = p.dialContext(nctx, "tcp", addr)
 		return
 	}
 	if ctx.IsConnect() {
-		dest, e := p.fastCl.Dial(i.ürl)
+		dest, e := p.fastCl.Dial(i.URL)
 		if e == nil {
 			ctx.SetStatusCode(h.StatusOK)
 			ctx.Hijack(func(client net.Conn) {
@@ -79,7 +74,7 @@ func (p *Proxy) RequestHandler(ctx *fh.RequestCtx) {
 				}
 			})
 		} else {
-			if i.ürl == "" {
+			if i.URL == "" {
 				ctx.Response.SetStatusCode(h.StatusBadRequest)
 			} else {
 				ctx.Response.SetStatusCode(h.StatusServiceUnavailable)

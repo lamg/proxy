@@ -23,6 +23,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"github.com/stretchr/testify/require"
 	fh "github.com/valyala/fasthttp"
 	"net"
@@ -40,12 +41,8 @@ func TestFastProxyRoundTrip(t *testing.T) {
 	buff := new(bytes.Buffer)
 	resp.WriteTo(buff)
 	server := newMockConn(buff.String(), false)
-	dial := func(iface string) func(string,
-		string) (net.Conn, error) {
-		return func(network, addr string) (n net.Conn, e error) {
-			n = server
-			return
-		}
+	dial := func(c context.Context, n, a string) (net.Conn, error) {
+		return server, nil
 	}
 	req := fh.AcquireRequest()
 	req.SetHost(ht.DefaultRemoteAddr)
@@ -55,8 +52,7 @@ func TestFastProxyRoundTrip(t *testing.T) {
 	req.WriteTo(buff0)
 	client := newMockConn(buff0.String(), false)
 
-	ctl := func(o *Operation) *Result { return new(Result) }
-	p := NewFastProxy(ctl, dial, time.Now)
+	p := NewFastProxy(dial)
 	srv := &fh.Server{
 		Handler: p.RequestHandler,
 	}
@@ -76,15 +72,11 @@ func TestFastProxyRoundTrip(t *testing.T) {
 func TestFastProxyConnect(t *testing.T) {
 	bla, blabla := "bla", "blabla"
 	server := newMockConn(blabla, false)
-	dial := func(iface string) func(string, string) (net.Conn,
-		error) {
-		return func(network, addr string) (n net.Conn, e error) {
-			n = server
-			return
-		}
+	dial := func(c context.Context, n, a string) (net.Conn, error) {
+		return server, nil
 	}
-	ctl := func(o *Operation) *Result { return new(Result) }
-	p := NewFastProxy(ctl, dial, time.Now)
+
+	p := NewFastProxy(dial)
 	srv := &fh.Server{
 		Handler: p.RequestHandler,
 	}
@@ -113,7 +105,6 @@ func TestFastProxyConnect(t *testing.T) {
 }
 
 func TestStdProxyRoundTrip(t *testing.T) {
-	ctl := func(o *Operation) *Result { return new(Result) }
 	bla := "bla"
 	rec := ht.NewRecorder()
 	rec.Body.WriteString(bla)
@@ -123,33 +114,24 @@ func TestStdProxyRoundTrip(t *testing.T) {
 	resp.Request = r
 	s := buff.String()
 	server := newMockConn(s, true)
-	dial := func(iface string) func(string, string) (net.Conn,
-		error) {
-		return func(network, addr string) (n net.Conn, e error) {
-			n = server
-			return
-		}
+	dial := func(c context.Context, n, a string) (net.Conn, error) {
+		return server, nil
 	}
-	p := NewProxy(ctl, dial, time.Now)
+	p := NewProxy(dial)
 	w := ht.NewRecorder()
 	p.ServeHTTP(w, r)
 	require.Equal(t, bla, w.Body.String())
 }
 
 func TestStdProxyConnect(t *testing.T) {
-	ctl := func(o *Operation) *Result { return new(Result) }
 	bla, blabla := "bla", "blabla"
 	client, server :=
 		newMockConn(bla, false),
 		newMockConn(blabla, false)
-	dial := func(iface string) func(string, string) (net.Conn,
-		error) {
-		return func(network, addr string) (n net.Conn, e error) {
-			n = server
-			return
-		}
+	dial := func(c context.Context, n, a string) (net.Conn, error) {
+		return server, nil
 	}
-	p := NewProxy(ctl, dial, time.Now)
+	p := NewProxy(dial)
 	w, r :=
 		&hijacker{
 			ResponseRecorder: ht.NewRecorder(),
@@ -162,6 +144,14 @@ func TestStdProxyConnect(t *testing.T) {
 	<-server.clöse
 	require.Equal(t, bla, server.write.String())
 	require.Equal(t, blabla, client.write.String())
+}
+
+func TestContainsNilIP(t *testing.T) {
+	var ip net.IP
+	_, ipn, e := net.ParseCIDR("127.0.0.1/32")
+	require.NoError(t, e)
+	f := ipn.Contains(ip)
+	require.False(t, f)
 }
 
 type hijacker struct {
