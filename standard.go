@@ -34,15 +34,13 @@ import (
 type Proxy struct {
 	trans       *h.Transport
 	fastCl      *fh.Client
-	dialContext func(context.Context, string, string) (net.Conn, error)
+	dialContext Dialer
 }
 
 // NewProxy creates a net/http.Handler ready to be used
 // as an HTTP/HTTPS proxy server in conjunction with
 // a net/http.Server
-func NewProxy(
-	dial func(context.Context, string, string) (net.Conn, error),
-) (p *Proxy) {
+func NewProxy(dial Dialer) (p *Proxy) {
 	p = &Proxy{
 		dialContext: dial,
 		trans:       new(h.Transport),

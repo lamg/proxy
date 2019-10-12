@@ -21,11 +21,15 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	alg "github.com/lamg/algorithms"
 	"io"
+	"net"
 	"sync"
 )
+
+type Dialer func(context.Context, string, string) (net.Conn, error)
 
 func transferWg(wg *sync.WaitGroup,
 	dest io.Writer, src io.Reader) {

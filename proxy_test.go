@@ -55,7 +55,7 @@ func TestFastProxyRoundTrip(t *testing.T) {
 	req.WriteTo(buff0)
 	client := newMockConn(buff0.String(), false)
 
-	p := NewFastProxy(dial)
+	p := NewFastProxy(Dialer(dial))
 	srv := &fh.Server{
 		Handler: p.RequestHandler,
 	}
@@ -134,7 +134,7 @@ func TestStdProxyConnect(t *testing.T) {
 	dial := func(c context.Context, n, a string) (net.Conn, error) {
 		return server, nil
 	}
-	p := NewProxy(dial)
+	p := NewProxy(Dialer(dial))
 	w, r :=
 		&hijacker{
 			ResponseRecorder: ht.NewRecorder(),
