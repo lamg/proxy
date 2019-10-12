@@ -35,9 +35,7 @@ import (
 // github.com/valyala/fasthttp.RequestHandler ready to be
 // used as an HTTP/HTTPS proxy server, in conjunction with
 // a github.com/valyala/fasthttp.Server
-func NewFastProxy(
-	dial func(context.Context, string, string) (net.Conn, error),
-) (p *Proxy) {
+func NewFastProxy(dial Dialer) (p *Proxy) {
 	gp.RegisterDialerType("http", newHTTPProxy)
 	p = &Proxy{
 		dialContext: dial,
