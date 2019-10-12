@@ -40,7 +40,7 @@ type httpProxy struct {
 }
 
 func newHTTPProxy(uri *url.URL,
-	forward proxy.Dialer) (proxy.Dialer, error) {
+	forward proxy.Dialer) (dlr proxy.Dialer, e error) {
 	s := new(httpProxy)
 	s.host = uri.Host
 	s.forward = forward
@@ -49,8 +49,8 @@ func newHTTPProxy(uri *url.URL,
 		s.username = uri.User.Username()
 		s.password, _ = uri.User.Password()
 	}
-
-	return s, nil
+	dlr = s
+	return
 }
 
 func (s *httpProxy) Dial(network,
@@ -97,10 +97,24 @@ func (s *httpProxy) Dial(network,
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		c.Close()
-		err = fmt.Errorf("Connect server using proxy error,"+
-			"StatusCode [%d]", resp.StatusCode)
+		err = &ExpectingCodeErr{
+			Context:  "Connect server using proxy error",
+			Expected: http.StatusOK,
+			Actual:   resp.StatusCode,
+		}
 		return nil, err
 	}
-
 	return c, nil
+}
+
+type ExpectingCodeErr struct {
+	Context  string
+	Expected int
+	Actual   int
+}
+
+func (e *ExpectingCodeErr) Error() (s string) {
+	s = fmt.Sprintf("%s:Expecting response status code %d, got %d",
+		e.Context, e.Expected, e.Actual)
+	return
 }

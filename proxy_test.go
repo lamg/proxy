@@ -31,6 +31,7 @@ import (
 	"net"
 	h "net/http"
 	ht "net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -273,4 +274,26 @@ func TestIfaceDialer(t *testing.T) {
 	ok := errors.As(e, &ne)
 	require.True(t, ok)
 	require.Equal(t, ifd.Interface, ne.Interface)
+}
+
+func TestRegisterHTTPProxy(t *testing.T) {
+	prx, e := url.Parse("http://127.0.0.1:8080")
+	require.NoError(t, e)
+	resp := "HTTP/1.1 502 Bad Gateway\r\n\r\n"
+	dlr := &dialer{c: newMockConn(resp, false)}
+	hpd, _ := newHTTPProxy(prx, dlr)
+	_, e = hpd.Dial(tcp, "https://example.com")
+	var err *ExpectingCodeErr
+	ok := errors.As(e, &err)
+	require.True(t, ok)
+	require.Equal(t, h.StatusOK, err.Expected)
+	require.Equal(t, h.StatusBadGateway, err.Actual)
+}
+
+type dialer struct {
+	c net.Conn
+}
+
+func (d *dialer) Dial(n, a string) (net.Conn, error) {
+	return d.c, nil
 }
