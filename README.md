@@ -33,7 +33,7 @@ import (
 
 func main() {
 	// localhost clients only
-  ar, e := newAllowedRanges("127.0.0.1/32")
+	ar, e := newAllowedRanges("127.0.0.1/32")
 	if e == nil {
 		p := proxy.NewProxy(ar.DialContext)
 		server := &h.Server{
