@@ -1,10 +1,10 @@
 module github.com/lamg/proxy
 
 require (
-	github.com/klauspost/compress v1.8.5 // indirect
+	github.com/klauspost/compress v1.9.1 // indirect
 	github.com/lamg/algorithms v0.0.0-20190516184438-e8502d0eb72f
 	github.com/stretchr/testify v1.4.0
-	github.com/valyala/fasthttp v1.5.0
+	github.com/valyala/fasthttp v1.6.0
 	golang.org/x/net v0.0.0-20190827160401-ba9fcec4b297
 )
 
